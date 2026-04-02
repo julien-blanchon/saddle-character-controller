@@ -1,0 +1,20 @@
+[package]
+name = "saddle-character-controller"
+version = "0.1.0"
+edition = "2024"
+publish = false
+repository = "https://github.com/julien-blanchon/saddle-character-controller"
+license = "MIT-0"
+description = "Reusable 3D kinematic character controller for Bevy using Avian3D and bevy_enhanced_input"
+
+[dependencies]
+bevy = { version = "0.18", features = ["serialize"] }
+avian3d = "0.6"
+bevy_enhanced_input = "0.24"
+
+[workspace]
+
+[lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"
+nonstandard_macro_braces = "warn"

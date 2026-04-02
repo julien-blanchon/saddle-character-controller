@@ -1,0 +1,14 @@
+[package]
+name = "saddle-character-controller-lab"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+avian3d = { workspace = true }
+bevy = { version = "0.18", features = ["serialize"] }
+bevy_enhanced_input = { workspace = true }
+saddle-character-controller = { workspace = true }
+
+[lints]
+workspace = true
