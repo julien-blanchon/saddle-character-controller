@@ -7,8 +7,8 @@ mod surfaces;
 mod systems;
 
 pub use components::{
-    CharacterController, CharacterLook, CharacterMantle, CharacterMotionStats, CharacterPush,
-    CharacterSwimming, CharacterWallKick, ExternalMotion,
+    CharacterController, CharacterFlying, CharacterLook, CharacterMantle, CharacterMotionStats,
+    CharacterPush, CharacterSwimming, CharacterWallKick, ExternalMotion, FlightCollisionMode,
 };
 pub use input::{
     AccumulatedInput, AscendAction, CrouchAction, JumpAction, LookAction, MoveAction, SprintAction,
@@ -17,7 +17,8 @@ pub use input::{
 pub use messages::{CharacterJumped, CharacterLanded, MovementModeChanged, SupportBodyChanged};
 pub use state::{CharacterControllerState, GroundContact, MantleState, MovementMode};
 pub use surfaces::{
-    CharacterControllerDebugDraw, MovementSurface, SupportVelocityPolicy, WaterLevel, WaterVolume,
+    CharacterControllerDebugDraw, MovementSurface, SupportRotationPolicy, SupportVelocityPolicy,
+    WaterLevel, WaterVolume,
 };
 
 use bevy::{
@@ -80,6 +81,7 @@ impl Plugin for CharacterControllerPlugin {
             .register_type::<AccumulatedInput>()
             .register_type::<CharacterController>()
             .register_type::<CharacterControllerState>()
+            .register_type::<CharacterFlying>()
             .register_type::<CharacterLook>()
             .register_type::<CharacterMantle>()
             .register_type::<CharacterMotionStats>()
@@ -87,11 +89,13 @@ impl Plugin for CharacterControllerPlugin {
             .register_type::<CharacterSwimming>()
             .register_type::<CharacterWallKick>()
             .register_type::<ExternalMotion>()
+            .register_type::<FlightCollisionMode>()
             .register_type::<GroundContact>()
             .register_type::<MantleState>()
             .register_type::<MovementMode>()
             .register_type::<CharacterControllerDebugDraw>()
             .register_type::<MovementSurface>()
+            .register_type::<SupportRotationPolicy>()
             .register_type::<SupportVelocityPolicy>()
             .register_type::<WaterLevel>()
             .register_type::<WaterVolume>()

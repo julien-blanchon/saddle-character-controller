@@ -11,6 +11,7 @@
 
 Optional abilities are additive components:
 
+- `CharacterFlying`
 - `CharacterSwimming`
 - `CharacterMantle`
 - `CharacterWallKick`
@@ -39,7 +40,7 @@ Within that flow, the runtime currently does:
 6. Resolve support-body velocity and detach grace.
 7. Resolve crouch shape transitions.
 8. Expire stale buffered actions.
-9. Apply movement-mode-specific acceleration, friction, gravity, jump, mantle, wall-kick, and slide motion.
+9. Apply movement-mode-specific acceleration, friction, gravity, jump, flying, mantle, wall-kick, and slide motion.
 10. Re-probe ground after motion and update support attachment.
 11. Publish movement messages and clear per-frame look accumulation.
 12. Draw optional debug gizmos in `PostUpdate`.
@@ -104,14 +105,16 @@ Support-body handling is a first-class part of the runtime:
 - support angular velocity is exposed separately in runtime state for live inspection and downstream hooks
 - `MovementSurface::conveyor_velocity` is added on top
 - `SupportVelocityPolicy` selects full, horizontal-only, or no inheritance
+- `SupportRotationPolicy` selects whether the controller inherits yaw from rotating supports
 - a detach grace window preserves momentum briefly after leaving the platform
 
-Per-surface override is supported through `MovementSurface::inherit_velocity_policy`.
+Per-surface override is supported through `MovementSurface::inherit_velocity_policy` and `MovementSurface::inherit_rotation_policy`.
 
 ## Ability Layering
 
 The controller stays extensible by keeping optional features in their own components:
 
+- `CharacterFlying` enables debug-spectator or jetpack-style free flight without changing the grounded movement configuration
 - `CharacterSwimming` enables swim-mode acceleration, gravity, and ascend input
 - `CharacterMantle` enables buffered ledge traversal attempts
 - `CharacterWallKick` enables wall-based jump redirects

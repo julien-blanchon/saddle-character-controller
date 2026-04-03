@@ -1,19 +1,20 @@
 use crate::{
     CharacterController, CharacterControllerState, CharacterMantle, ExternalMotion,
     components::{
-        CharacterColliderCache, CharacterControllerScratch, CharacterMotionStats, CharacterPush,
-        CharacterSwimming, CharacterWallKick, PendingLanding,
+        CharacterColliderCache, CharacterControllerScratch, CharacterFlying, CharacterLook,
+        CharacterMotionStats, CharacterPush, CharacterSwimming, CharacterWallKick,
+        FlightCollisionMode, PendingLanding,
     },
     helpers::{
         ages_recently, apply_ground_friction, clamp_velocity, classify_mode, expire_old,
-        ground_probe_distance, horizontal, horizontal_speed, inherited_support_velocity,
-        is_walkable, jump_velocity_for_height, quake_acceleration_delta, safe_dt,
-        step_height_allowed, support_detach_velocity, travel_towards, wish_velocity_3d,
-        wish_velocity_from_input,
+        ground_probe_distance, horizontal, horizontal_speed, inherited_support_rotation,
+        inherited_support_velocity, is_walkable, jump_velocity_for_height,
+        quake_acceleration_delta, safe_dt, step_height_allowed, support_detach_velocity,
+        travel_towards, wish_velocity_3d, wish_velocity_from_input,
     },
     input::AccumulatedInput,
     state::{GroundContact, MantleState},
-    surfaces::{MovementSurface, SupportVelocityPolicy, WaterLevel},
+    surfaces::{MovementSurface, SupportRotationPolicy, SupportVelocityPolicy, WaterLevel},
 };
 use avian3d::{
     character_controller::move_and_slide::{DepenetrationConfig, MoveAndSlideHitResponse},
@@ -30,6 +31,7 @@ struct SurfaceProfile {
     jump_multiplier: f32,
     conveyor_velocity: Vec3,
     inherit_velocity_policy: Option<SupportVelocityPolicy>,
+    inherit_rotation_policy: Option<SupportRotationPolicy>,
     slide_only: bool,
 }
 
@@ -48,6 +50,7 @@ impl Default for SurfaceProfile {
             jump_multiplier: 1.0,
             conveyor_velocity: Vec3::ZERO,
             inherit_velocity_policy: None,
+            inherit_rotation_policy: None,
             slide_only: false,
         }
     }
@@ -66,6 +69,7 @@ type ControllerQuery<'w, 's> = Query<
         &'static mut Transform,
         &'static CharacterColliderCache,
         &'static mut CharacterControllerScratch,
+        Option<&'static CharacterFlying>,
         Option<&'static CharacterMantle>,
         Option<&'static CharacterWallKick>,
         Option<&'static CharacterSwimming>,
@@ -98,6 +102,7 @@ type SupportBodyQuery<'w, 's> = Query<
 
 pub(crate) fn run_controllers(
     mut controllers: ControllerQuery,
+    mut looks: Query<&mut CharacterLook, With<CharacterController>>,
     move_and_slide: MoveAndSlide,
     surfaces: Query<&MovementSurface>,
     support_colliders: SupportColliderQuery,
@@ -119,6 +124,7 @@ pub(crate) fn run_controllers(
         mut transform,
         cache,
         mut scratch,
+        flying,
         mantle,
         wall_kick,
         swimming,
@@ -126,6 +132,7 @@ pub(crate) fn run_controllers(
         external_motion,
     ) in &mut controllers
     {
+        let mut look = looks.get_mut(entity).ok();
         scratch.contacts.clear();
         scratch.pending_jump = false;
         scratch.pending_landing = None;
@@ -177,15 +184,40 @@ pub(crate) fn run_controllers(
             dt,
         );
 
-        resolve_crouch(
-            entity,
-            controller,
-            &move_and_slide,
-            cache,
-            &mut state,
-            &mut input,
-            &transform,
-        );
+        if flying.is_some_and(|flight| flight.enabled) {
+            state.ground = None;
+            state.support_velocity = Vec3::ZERO;
+            state.support_angular_velocity = Vec3::ZERO;
+            state.detach_time = controller.support_detach_grace.as_secs_f32();
+            state.mantle = None;
+        } else if state.ground.is_some_and(|ground| ground.walkable) {
+            apply_support_rotation(
+                effective_support_rotation_policy(
+                    controller,
+                    state.ground,
+                    &surfaces,
+                    &support_colliders,
+                ),
+                &mut state,
+                look.as_deref_mut(),
+                &mut transform,
+                dt,
+            );
+        }
+
+        if flying.is_some_and(|flight| flight.enabled) {
+            state.crouching = false;
+        } else {
+            resolve_crouch(
+                entity,
+                controller,
+                &move_and_slide,
+                cache,
+                &mut state,
+                &mut input,
+                &transform,
+            );
+        }
 
         expire_old(
             &mut input.jump_pressed_for,
@@ -260,80 +292,16 @@ pub(crate) fn run_controllers(
                 wish_velocity_3d = wish_velocity_3d.clamp_length_max(move_speed);
             }
 
-            if try_start_mantle(
-                entity,
-                controller,
-                mantle,
-                cache,
-                &move_and_slide,
-                &surfaces,
-                &support_colliders,
-                &mut state,
-                &mut input,
-                &transform,
-                &mut stats,
-            ) {
-                continue;
-            }
-
-            let jump_speed = jump_velocity_for_height(controller.gravity, controller.jump_height)
-                * surface_profile.jump_multiplier;
-            let pre_jump_vertical_speed = linear_velocity.y;
-            let jumped = try_jump(
-                entity,
-                controller,
-                cache,
-                &move_and_slide,
-                wall_kick,
-                jump_speed,
-                wish_velocity,
-                &mut state,
-                &mut input,
-                &mut linear_velocity,
-                &mut transform,
-                &mut stats,
-            );
-            if jumped {
-                scratch.pending_jump = true;
-                state.last_jump_speed = jump_speed;
-            }
-
-            if let Some(swim) = swimming.filter(|_| state.water_level > WaterLevel::Feet) {
-                water_move(
+            if let Some(flying) = flying.filter(|flight| flight.enabled) {
+                fly_move(
                     entity,
                     controller,
-                    swim,
+                    flying,
                     cache,
                     &move_and_slide,
                     dt,
-                    support_velocity,
                     wish_velocity_3d,
-                    &mut linear_velocity,
-                    &mut transform,
-                    &mut state,
-                    &mut scratch,
-                    &mut stats,
-                );
-            } else if state.ground.is_some_and(|ground| ground.walkable) {
-                if !(controller.auto_bhop && state.grounded_frames <= 1) {
-                    let friction_velocity = apply_ground_friction(
-                        horizontal(linear_velocity.0),
-                        controller.stop_speed,
-                        controller.friction_hz,
-                        surface_profile.traction_multiplier,
-                        dt,
-                    );
-                    linear_velocity.x = friction_velocity.x;
-                    linear_velocity.z = friction_velocity.z;
-                }
-                ground_move(
-                    entity,
-                    controller,
-                    cache,
-                    &move_and_slide,
-                    dt,
-                    support_velocity + surface_profile.conveyor_velocity,
-                    wish_velocity * surface_profile.acceleration_multiplier,
+                    &input,
                     &mut linear_velocity,
                     &mut transform,
                     &mut state,
@@ -341,49 +309,136 @@ pub(crate) fn run_controllers(
                     &mut stats,
                 );
             } else {
-                air_move(
+                if try_start_mantle(
+                    entity,
+                    controller,
+                    mantle,
+                    cache,
+                    &move_and_slide,
+                    &surfaces,
+                    &support_colliders,
+                    &mut state,
+                    &mut input,
+                    &transform,
+                    &mut stats,
+                ) {
+                    continue;
+                }
+
+                let jump_speed =
+                    jump_velocity_for_height(controller.gravity, controller.jump_height)
+                        * surface_profile.jump_multiplier;
+                let pre_jump_vertical_speed = linear_velocity.y;
+                let jumped = try_jump(
                     entity,
                     controller,
                     cache,
                     &move_and_slide,
-                    dt,
-                    support_velocity,
+                    wall_kick,
+                    jump_speed,
                     wish_velocity,
+                    &mut state,
+                    &mut input,
                     &mut linear_velocity,
                     &mut transform,
-                    &mut state,
-                    &mut scratch,
                     &mut stats,
                 );
-            }
+                if jumped {
+                    scratch.pending_jump = true;
+                    state.last_jump_speed = jump_speed;
+                }
 
-            if state.water_level <= WaterLevel::Feet {
-                let gravity_scale = if state.ground.is_some_and(|ground| !ground.walkable) {
-                    controller.slide_gravity_scale
-                } else if linear_velocity.y < 0.0 {
-                    controller.fall_gravity_multiplier
+                if let Some(swim) = swimming.filter(|_| state.water_level > WaterLevel::Feet) {
+                    water_move(
+                        entity,
+                        controller,
+                        swim,
+                        cache,
+                        &move_and_slide,
+                        dt,
+                        support_velocity,
+                        wish_velocity_3d,
+                        &mut linear_velocity,
+                        &mut transform,
+                        &mut state,
+                        &mut scratch,
+                        &mut stats,
+                    );
+                } else if state.ground.is_some_and(|ground| ground.walkable) {
+                    if !(controller.auto_bhop && state.grounded_frames <= 1) {
+                        let friction_velocity = apply_ground_friction(
+                            horizontal(linear_velocity.0),
+                            controller.stop_speed,
+                            controller.friction_hz,
+                            surface_profile.traction_multiplier,
+                            dt,
+                        );
+                        linear_velocity.x = friction_velocity.x;
+                        linear_velocity.z = friction_velocity.z;
+                    }
+                    ground_move(
+                        entity,
+                        controller,
+                        cache,
+                        &move_and_slide,
+                        dt,
+                        support_velocity + surface_profile.conveyor_velocity,
+                        wish_velocity * surface_profile.acceleration_multiplier,
+                        &mut linear_velocity,
+                        &mut transform,
+                        &mut state,
+                        &mut scratch,
+                        &mut stats,
+                    );
                 } else {
-                    1.0
-                };
-                linear_velocity.y -= controller.gravity * gravity_scale * 0.5 * dt;
+                    air_move(
+                        entity,
+                        controller,
+                        cache,
+                        &move_and_slide,
+                        dt,
+                        support_velocity,
+                        wish_velocity,
+                        &mut linear_velocity,
+                        &mut transform,
+                        &mut state,
+                        &mut scratch,
+                        &mut stats,
+                    );
+                }
+
+                if state.water_level <= WaterLevel::Feet {
+                    let gravity_scale = if state.ground.is_some_and(|ground| !ground.walkable) {
+                        controller.slide_gravity_scale
+                    } else if linear_velocity.y < 0.0 {
+                        controller.fall_gravity_multiplier
+                    } else {
+                        1.0
+                    };
+                    linear_velocity.y -= controller.gravity * gravity_scale * 0.5 * dt;
+                }
+                linear_velocity.y = linear_velocity.y.max(-controller.terminal_velocity);
+                let _ = pre_jump_vertical_speed;
             }
-            linear_velocity.y = linear_velocity.y.max(-controller.terminal_velocity);
-            let _ = pre_jump_vertical_speed;
         }
 
-        let mut post_ground = ground_probe(
-            entity,
-            controller,
-            &move_and_slide,
-            &surfaces,
-            &support_colliders,
-            cache,
-            &state,
-            &transform,
-            state.support_velocity,
-            dt,
-            &mut stats,
-        );
+        let mut post_ground = if flying.is_some_and(|flight| flight.enabled) {
+            None
+        } else {
+            ground_probe(
+                entity,
+                controller,
+                &move_and_slide,
+                &surfaces,
+                &support_colliders,
+                cache,
+                &state,
+                &transform,
+                state.support_velocity,
+                dt,
+                &mut stats,
+            )
+        };
         if post_ground.is_none() || post_ground.is_some_and(|ground| !ground.walkable) {
             snap_to_ground(
                 entity,
@@ -407,6 +462,9 @@ pub(crate) fn run_controllers(
                 dt,
                 &mut stats,
             );
+        }
+        if flying.is_some_and(|flight| flight.enabled) {
+            post_ground = None;
         }
 
         let was_grounded = scratch.previous_grounded;
@@ -447,6 +505,7 @@ pub(crate) fn run_controllers(
         }
 
         state.movement_mode = classify_mode(
+            flying.is_some_and(|flight| flight.enabled),
             swimming.is_some(),
             state.water_level,
             state.ground,
@@ -623,6 +682,36 @@ fn calculate_support_motion(
         surface_profile_for_entity(ground_entity, surfaces, support_colliders).conveyor_velocity;
     motion.angular_velocity = angular_velocity;
     motion
+}
+
+fn apply_support_rotation(
+    policy: SupportRotationPolicy,
+    state: &mut CharacterControllerState,
+    look: Option<&mut CharacterLook>,
+    transform: &mut Transform,
+    dt: f32,
+) {
+    let inherited = inherited_support_rotation(policy, state.support_angular_velocity);
+    if inherited == Vec3::ZERO {
+        return;
+    }
+
+    let delta = Quat::from_scaled_axis(inherited * dt);
+    if let Some(look) = look {
+        match policy {
+            SupportRotationPolicy::None => {}
+            SupportRotationPolicy::YawOnly => {
+                look.yaw += inherited.y * dt;
+                state.orientation = look.orientation();
+            }
+        }
+    } else {
+        state.orientation = (delta * state.orientation).normalize();
+    }
+
+    if policy != SupportRotationPolicy::None {
+        transform.rotation = state.orientation;
+    }
 }
 
 fn resolve_crouch(
@@ -895,6 +984,71 @@ fn try_jump(
     let jump_dir = (Vec3::Y * wall_kick.upward_factor + away + direction).normalize_or_zero();
     linear_velocity.0 += jump_dir * (jump_speed * wall_kick.power);
     true
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fly_move(
+    entity: Entity,
+    controller: &CharacterController,
+    flying: &CharacterFlying,
+    cache: &CharacterColliderCache,
+    move_and_slide: &MoveAndSlide,
+    dt: f32,
+    mut wish_velocity: Vec3,
+    input: &AccumulatedInput,
+    linear_velocity: &mut LinearVelocity,
+    transform: &mut Transform,
+    state: &mut CharacterControllerState,
+    scratch: &mut CharacterControllerScratch,
+    stats: &mut CharacterMotionStats,
+) {
+    let flight_speed = if input.sprint_active {
+        flying.speed * flying.sprint_speed_scale
+    } else {
+        flying.speed
+    }
+    .max(0.0)
+        * controller.global_speed_scale.max(0.0);
+
+    let vertical_speed = flight_speed * flying.vertical_speed_scale.max(0.0);
+    if input.ascend_active {
+        wish_velocity += Vec3::Y * vertical_speed;
+    }
+    if input.crouch_active {
+        wish_velocity -= Vec3::Y * vertical_speed;
+    }
+    wish_velocity = wish_velocity.clamp_length_max(flight_speed.max(vertical_speed));
+
+    linear_velocity.0 = apply_ground_friction(linear_velocity.0, 0.0, flying.drag_hz, 1.0, dt);
+    linear_velocity.0 += quake_acceleration_delta(
+        linear_velocity.0,
+        wish_velocity,
+        wish_velocity.length(),
+        flying.acceleration_hz,
+        dt,
+        None,
+    );
+    linear_velocity.0 = clamp_velocity(linear_velocity.0, controller.max_speed);
+
+    match flying.collision_mode {
+        FlightCollisionMode::NoClip => {
+            transform.translation += linear_velocity.0 * dt;
+        }
+        FlightCollisionMode::Slide => {
+            move_character(
+                entity,
+                controller,
+                cache,
+                move_and_slide,
+                dt,
+                linear_velocity,
+                transform,
+                state,
+                scratch,
+                stats,
+            );
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1276,6 +1430,7 @@ fn surface_profile_for_entity(
             jump_multiplier: surface.jump_multiplier,
             conveyor_velocity: surface.conveyor_velocity,
             inherit_velocity_policy: surface.inherit_velocity_policy,
+            inherit_rotation_policy: surface.inherit_rotation_policy,
             slide_only: surface.slide_only,
         };
     }
@@ -1293,6 +1448,7 @@ fn surface_profile_for_entity(
             jump_multiplier: surface.jump_multiplier,
             conveyor_velocity: surface.conveyor_velocity,
             inherit_velocity_policy: surface.inherit_velocity_policy,
+            inherit_rotation_policy: surface.inherit_rotation_policy,
             slide_only: surface.slide_only,
         }
     } else {
@@ -1310,4 +1466,16 @@ fn effective_support_policy(
         .map(|ground| surface_profile_for_entity(ground.entity, surfaces, support_colliders))
         .and_then(|surface| surface.inherit_velocity_policy)
         .unwrap_or(controller.support_velocity_policy)
+}
+
+fn effective_support_rotation_policy(
+    controller: &CharacterController,
+    ground: Option<GroundContact>,
+    surfaces: &Query<&MovementSurface>,
+    support_colliders: &SupportColliderQuery,
+) -> SupportRotationPolicy {
+    ground
+        .map(|ground| surface_profile_for_entity(ground.entity, surfaces, support_colliders))
+        .and_then(|surface| surface.inherit_rotation_policy)
+        .unwrap_or(controller.support_rotation_policy)
 }

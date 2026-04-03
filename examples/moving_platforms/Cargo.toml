@@ -8,6 +8,7 @@ publish = false
 bevy = { workspace = true }
 saddle-character-controller = { workspace = true }
 saddle-character-controller-example-common = { path = "../common" }
+saddle-pane = { workspace = true }
 
 [lints]
 workspace = true

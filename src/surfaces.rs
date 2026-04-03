@@ -8,6 +8,12 @@ pub enum SupportVelocityPolicy {
     Full,
 }
 
+#[derive(Reflect, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupportRotationPolicy {
+    None,
+    YawOnly,
+}
+
 #[derive(Component, Reflect, Debug, Clone)]
 #[reflect(Component, Debug)]
 pub struct MovementSurface {
@@ -17,6 +23,7 @@ pub struct MovementSurface {
     pub jump_multiplier: f32,
     pub conveyor_velocity: Vec3,
     pub inherit_velocity_policy: Option<SupportVelocityPolicy>,
+    pub inherit_rotation_policy: Option<SupportRotationPolicy>,
     pub slide_only: bool,
 }
 
@@ -29,6 +36,7 @@ impl Default for MovementSurface {
             jump_multiplier: 1.0,
             conveyor_velocity: Vec3::ZERO,
             inherit_velocity_policy: None,
+            inherit_rotation_policy: None,
             slide_only: false,
         }
     }

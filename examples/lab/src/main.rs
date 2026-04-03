@@ -1,3 +1,8 @@
+#[cfg(feature = "e2e")]
+mod e2e;
+#[cfg(feature = "e2e")]
+mod scenarios;
+
 use std::{fmt::Write as _, time::Duration};
 
 use avian3d::prelude::*;
@@ -7,13 +12,24 @@ use bevy::{
     window::{CursorGrabMode, CursorOptions},
 };
 use bevy_enhanced_input::prelude::*;
+use saddle_animation_ik::{
+    IkChain, IkChainState, IkConstraint, IkDebugSettings, IkJoint, IkPlugin, IkSystems,
+    LookAtTarget,
+};
 use saddle_character_controller::{
     AccumulatedInput, AscendAction, CharacterController, CharacterControllerPlugin,
-    CharacterControllerState, CharacterControllerSystems, CharacterLook, CharacterMantle,
-    CharacterMotionStats, CharacterPush, CharacterSwimming, CharacterWallKick, CrouchAction,
-    JumpAction, LookAction, MoveAction, MovementSurface, SprintAction, SupportVelocityPolicy,
-    TraverseAction, WaterVolume,
+    CharacterControllerState, CharacterControllerSystems, CharacterFlying, CharacterLook,
+    CharacterMantle, CharacterMotionStats, CharacterPush, CharacterSwimming, CharacterWallKick,
+    CrouchAction, FlightCollisionMode, JumpAction, LookAction, MoveAction, MovementSurface,
+    SprintAction, SupportRotationPolicy, SupportVelocityPolicy, TraverseAction, WaterVolume,
 };
+use saddle_character_state_machine::{
+    CharacterAnimationFacts, CharacterAnimationSelection, CharacterStateMachine,
+    CharacterStateMachineDefinition, CharacterStateMachineLibrary, CharacterStateMachinePlugin,
+    CharacterStateMachineRuntime, CharacterStateMachineSystems, LocomotionMode, StateDefinition,
+    TransitionCondition, TransitionDefinition,
+};
+use saddle_pane::prelude::*;
 
 #[derive(Component)]
 struct LabController;
@@ -26,6 +42,28 @@ struct LabCamera {
 
 #[derive(Component)]
 struct LabOverlay;
+
+#[derive(Component)]
+struct LabBody;
+
+#[derive(Component)]
+struct LabLookController;
+
+#[derive(Component)]
+struct LabLookTarget;
+
+#[derive(Resource, Default, Clone, Debug, Reflect)]
+#[reflect(Resource)]
+struct LabDiagnostics {
+    controller_position: Vec3,
+    movement_mode: String,
+    grounded_on: String,
+    support_angular_speed: f32,
+    current_speed: f32,
+    animation_state: String,
+    animation_binding: String,
+    look_error: f32,
+}
 
 #[derive(Component)]
 struct MovingPlatform {
@@ -42,14 +80,109 @@ enum LabFixedSystems {
     AnimatePlatforms,
 }
 
+#[derive(Resource, Pane)]
+#[pane(title = "Character Controller Lab")]
+struct LabPane {
+    #[pane(tab = "Movement", slider, min = 4.0, max = 20.0, step = 0.1)]
+    speed: f32,
+    #[pane(tab = "Movement", slider, min = 1.0, max = 2.5, step = 0.05)]
+    sprint_speed_scale: f32,
+    #[pane(tab = "Movement", slider, min = 0.5, max = 3.0, step = 0.05)]
+    jump_height: f32,
+    #[pane(tab = "Movement", slider, min = 0.1, max = 1.2, step = 0.05)]
+    step_size: f32,
+    #[pane(tab = "Movement", slider, min = 0.0005, max = 0.01, step = 0.0001)]
+    look_sensitivity: f32,
+    #[pane(tab = "Movement")]
+    inherit_support_yaw: bool,
+    #[pane(tab = "Traversal")]
+    flight_enabled: bool,
+    #[pane(tab = "Traversal", slider, min = 4.0, max = 30.0, step = 0.5)]
+    flight_speed: f32,
+    #[pane(tab = "Traversal")]
+    flight_noclip: bool,
+    #[pane(tab = "IK", slider, min = 1.5, max = 8.0, step = 0.1)]
+    look_distance: f32,
+    #[pane(tab = "IK", slider, min = 0.0, max = 1.0, step = 0.05)]
+    look_weight: f32,
+    #[pane(tab = "Runtime", monitor)]
+    movement_mode: String,
+    #[pane(tab = "Runtime", monitor)]
+    grounded_on: String,
+    #[pane(tab = "Runtime", monitor)]
+    current_speed: f32,
+    #[pane(tab = "Runtime", monitor)]
+    support_angular_speed: f32,
+    #[pane(tab = "Runtime", monitor)]
+    animation_state: String,
+    #[pane(tab = "Runtime", monitor)]
+    animation_binding: String,
+    #[pane(tab = "Runtime", monitor)]
+    look_error: f32,
+}
+
+impl Default for LabPane {
+    fn default() -> Self {
+        Self {
+            speed: 12.0,
+            sprint_speed_scale: 1.5,
+            jump_height: 1.8,
+            step_size: 0.7,
+            look_sensitivity: 0.0023,
+            inherit_support_yaw: true,
+            flight_enabled: false,
+            flight_speed: 14.0,
+            flight_noclip: false,
+            look_distance: 4.8,
+            look_weight: 1.0,
+            movement_mode: "Airborne".into(),
+            grounded_on: "none".into(),
+            current_speed: 0.0,
+            support_angular_speed: 0.0,
+            animation_state: "Idle".into(),
+            animation_binding: "idle".into(),
+            look_error: 0.0,
+        }
+    }
+}
+
+fn pane_plugins() -> (
+    bevy_flair::FlairPlugin,
+    bevy_input_focus::InputDispatchPlugin,
+    bevy_ui_widgets::UiWidgetsPlugins,
+    bevy_input_focus::tab_navigation::TabNavigationPlugin,
+    saddle_pane::PanePlugin,
+) {
+    (
+        bevy_flair::FlairPlugin,
+        bevy_input_focus::InputDispatchPlugin,
+        bevy_ui_widgets::UiWidgetsPlugins,
+        bevy_input_focus::tab_navigation::TabNavigationPlugin,
+        saddle_pane::PanePlugin,
+    )
+}
+
 fn main() {
     let mut app = App::new();
     app.insert_resource(Time::<Fixed>::from_hz(60.0));
+    app.init_resource::<LabDiagnostics>();
+    app.init_resource::<LabPane>();
+    app.register_type::<LabDiagnostics>();
+    app.register_pane::<LabPane>();
     app.add_plugins((
         DefaultPlugins,
         PhysicsPlugins::default(),
         CharacterControllerPlugin::always_on(FixedUpdate),
+        CharacterStateMachinePlugin::always_on(Update),
+        IkPlugin::default(),
+        pane_plugins(),
     ));
+    app.insert_resource(IkDebugSettings {
+        enabled: false,
+        ..default()
+    });
+    #[cfg(feature = "e2e")]
+    app.add_plugins(e2e::CharacterControllerLabE2EPlugin);
     app.configure_sets(
         FixedUpdate,
         LabFixedSystems::AnimatePlatforms.before(CharacterControllerSystems::Grounding),
@@ -62,7 +195,12 @@ fn main() {
     app.add_systems(
         Update,
         (
-            sync_overlay,
+            sync_animation_facts.before(CharacterStateMachineSystems::GatherFacts),
+            sync_look_target.before(IkSystems::Prepare),
+            (sync_body_visuals, sync_lab_pane, sync_overlay)
+                .chain()
+                .after(CharacterStateMachineSystems::ApplyAnimation)
+                .after(IkSystems::Apply),
             capture_cursor.run_if(input_just_pressed(MouseButton::Left)),
             release_cursor.run_if(input_just_pressed(KeyCode::Escape)),
         ),
@@ -76,6 +214,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut library: ResMut<CharacterStateMachineLibrary>,
 ) {
     commands.spawn((
         Name::new("Lab Sun"),
@@ -198,7 +337,9 @@ fn setup(
         Color::srgb(0.56, 0.40, 0.28),
     );
 
-    spawn_controller(&mut commands, &mut meshes, &mut materials);
+    let definition_id = library.register(build_lab_animation_definition()).unwrap();
+    spawn_look_target(&mut commands, &mut meshes, &mut materials);
+    spawn_controller(&mut commands, &mut meshes, &mut materials, definition_id);
 
     commands.spawn((
         Name::new("Lab Camera"),
@@ -240,11 +381,18 @@ fn spawn_controller(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
+    definition_id: saddle_character_state_machine::CharacterStateMachineDefinitionId,
 ) -> Entity {
     let player = commands
         .spawn((
             Name::new("Lab Controller"),
             LabController,
+            CharacterStateMachine::new(definition_id),
+            CharacterAnimationFacts {
+                grounded: true,
+                locomotion_mode: LocomotionMode::Idle,
+                ..default()
+            },
             CharacterController {
                 support_velocity_policy: SupportVelocityPolicy::Full,
                 support_detach_grace: Duration::from_millis(180),
@@ -260,6 +408,12 @@ fn spawn_controller(
             CharacterMantle::default(),
             CharacterWallKick::default(),
             CharacterPush::default(),
+            CharacterFlying {
+                enabled: false,
+                collision_mode: FlightCollisionMode::NoClip,
+                ..default()
+            },
+            Visibility::Inherited,
             Transform::from_xyz(0.0, 2.5, 14.0),
             actions!(CharacterController[
                 (
@@ -297,6 +451,8 @@ fn spawn_controller(
 
     commands.entity(player).with_children(|parent| {
         parent.spawn((
+            Name::new("Lab Body"),
+            LabBody,
             Mesh3d(meshes.add(Capsule3d::new(0.38, 1.0))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgb(0.92, 0.44, 0.24),
@@ -306,8 +462,139 @@ fn spawn_controller(
             Transform::from_xyz(0.0, 0.9, 0.0),
         ));
     });
+    spawn_look_rig(commands, meshes, materials, player);
 
     player
+}
+
+fn build_lab_animation_definition() -> CharacterStateMachineDefinition {
+    CharacterStateMachineDefinition::new("controller_lab_stack", "Idle")
+        .with_fallback_state("Idle")
+        .add_state(StateDefinition::new("Idle").with_binding("idle"))
+        .add_state(StateDefinition::new("Move").with_binding("move"))
+        .add_state(StateDefinition::new("Airborne").with_binding("airborne"))
+        .add_transition(
+            TransitionDefinition::switch("idle_to_move", "Idle", "Move")
+                .when(TransitionCondition::SpeedAtLeast(0.2)),
+        )
+        .add_transition(
+            TransitionDefinition::switch("move_to_idle", "Move", "Idle")
+                .when(TransitionCondition::SpeedAtMost(0.1)),
+        )
+        .add_transition(
+            TransitionDefinition::switch("idle_to_airborne", "Idle", "Airborne")
+                .when(TransitionCondition::Grounded(false)),
+        )
+        .add_transition(
+            TransitionDefinition::switch("move_to_airborne", "Move", "Airborne")
+                .when(TransitionCondition::Grounded(false)),
+        )
+        .add_transition(
+            TransitionDefinition::switch("airborne_to_idle", "Airborne", "Idle")
+                .when(TransitionCondition::Grounded(true))
+                .when(TransitionCondition::SpeedAtMost(0.1)),
+        )
+        .add_transition(
+            TransitionDefinition::switch("airborne_to_move", "Airborne", "Move")
+                .when(TransitionCondition::Grounded(true))
+                .when(TransitionCondition::SpeedAtLeast(0.2)),
+        )
+}
+
+fn spawn_look_target(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    commands.spawn((
+        Name::new("Lab Look Target"),
+        LabLookTarget,
+        Mesh3d(meshes.add(Sphere::new(0.18).mesh().uv(20, 12))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.58, 0.26),
+            emissive: Color::srgb(1.0, 0.32, 0.14).into(),
+            ..default()
+        })),
+        Transform::from_xyz(0.0, 1.8, 9.0),
+    ));
+}
+
+fn spawn_look_rig(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    player: Entity,
+) {
+    let joint = IkJoint {
+        tip_axis: -Vec3::Z,
+        pole_axis: Vec3::Y,
+        ..default()
+    };
+    let joint_mesh = meshes.add(Sphere::new(0.12).mesh().uv(20, 12));
+    let joint_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.28, 0.82, 0.96),
+        emissive: Color::srgb(0.08, 0.24, 0.32).into(),
+        perceptual_roughness: 0.72,
+        ..default()
+    });
+
+    let root = commands
+        .spawn((
+            Name::new("Lab Neck Root"),
+            Mesh3d(joint_mesh.clone()),
+            MeshMaterial3d(joint_material.clone()),
+            Transform::from_xyz(0.0, 1.45, -0.05),
+            joint,
+        ))
+        .id();
+    let neck = commands
+        .spawn((
+            Name::new("Lab Neck Joint"),
+            Mesh3d(joint_mesh.clone()),
+            MeshMaterial3d(joint_material.clone()),
+            Transform::from_xyz(0.0, 0.0, -0.24),
+            joint,
+        ))
+        .id();
+    let head = commands
+        .spawn((
+            Name::new("Lab Head Joint"),
+            Mesh3d(joint_mesh),
+            MeshMaterial3d(joint_material),
+            Transform::from_xyz(0.0, 0.0, -0.24),
+            joint,
+        ))
+        .id();
+
+    commands.entity(player).add_child(root);
+    commands.entity(root).add_child(neck);
+    commands.entity(neck).add_child(head);
+    commands.entity(root).insert(IkConstraint::Cone {
+        axis: -Vec3::Z,
+        max_angle: 1.05,
+        strength: 1.0,
+    });
+    commands.entity(neck).insert(IkConstraint::Cone {
+        axis: -Vec3::Z,
+        max_angle: 0.85,
+        strength: 1.0,
+    });
+
+    commands.spawn((
+        Name::new("Lab Look Controller"),
+        LabLookController,
+        IkChain {
+            joints: vec![root, neck, head],
+            ..default()
+        },
+        LookAtTarget {
+            point: Vec3::new(0.0, 1.8, 9.0),
+            forward_axis: -Vec3::Z,
+            up_axis: Vec3::Y,
+            reach_distance: Some(4.8),
+            ..default()
+        },
+    ));
 }
 
 fn follow_camera(
@@ -326,6 +613,115 @@ fn follow_camera(
     .looking_at(focus, Vec3::Y);
 }
 
+fn sync_animation_facts(
+    controller: Single<
+        (
+            &CharacterController,
+            &CharacterControllerState,
+            &CharacterMotionStats,
+            &LinearVelocity,
+            &mut CharacterAnimationFacts,
+        ),
+        With<LabController>,
+    >,
+) {
+    let (controller, state, stats, velocity, mut facts) = controller.into_inner();
+    let normalized_speed = (stats.horizontal_speed / controller.speed.max(0.01)).clamp(0.0, 1.5);
+    let facing = state.orientation * -Vec3::Z;
+
+    facts.speed = normalized_speed;
+    facts.locomotion_intensity = normalized_speed;
+    facts.locomotion_mode = if stats.horizontal_speed > controller.speed * 0.45 {
+        LocomotionMode::Run
+    } else if stats.horizontal_speed > 0.2 {
+        LocomotionMode::Walk
+    } else {
+        LocomotionMode::Idle
+    };
+    facts.grounded = state.ground.is_some();
+    facts.vertical_velocity = velocity.y;
+    facts.facing_direction = Vec2::new(facing.x, facing.z).normalize_or_zero();
+    facts.aim_direction = facts.facing_direction;
+}
+
+fn sync_look_target(
+    time: Res<Time>,
+    controller: Single<(&Transform, &CharacterControllerState), With<LabController>>,
+    mut target: Single<&mut Transform, (With<LabLookTarget>, Without<LabController>)>,
+    mut look_controller: Single<&mut LookAtTarget, With<LabLookController>>,
+) {
+    let (controller_transform, controller_state) = *controller;
+    let forward = controller_state.orientation * -Vec3::Z;
+    let right = controller_state.orientation * Vec3::X;
+    let bob = (time.elapsed_secs() * 1.2).sin() * 0.35;
+    let sway = (time.elapsed_secs() * 0.8).cos() * 0.7;
+    let point = controller_transform.translation
+        + Vec3::Y * 1.7
+        + forward * look_controller.reach_distance.unwrap_or(4.8)
+        + right * sway
+        + Vec3::Y * bob;
+    target.translation = point;
+    look_controller.point = point;
+}
+
+fn sync_body_visuals(
+    controller: Single<
+        (
+            &CharacterControllerState,
+            &CharacterStateMachineRuntime,
+            &CharacterAnimationSelection,
+        ),
+        With<LabController>,
+    >,
+    look_state: Single<&IkChainState, With<LabLookController>>,
+    body: Single<
+        (&MeshMaterial3d<StandardMaterial>, &mut Transform),
+        (With<LabBody>, Without<LabController>),
+    >,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let (state, runtime, selection) = *controller;
+    let current_state = runtime
+        .current_state
+        .as_ref()
+        .map(|value| value.0.as_str())
+        .unwrap_or("none");
+    let current_binding = selection
+        .binding
+        .as_ref()
+        .map(|value| value.0.as_str())
+        .unwrap_or("none");
+    let (material_handle, mut body_transform) = body.into_inner();
+    if let Some(material) = materials.get_mut(&material_handle.0) {
+        match current_binding {
+            "move" => {
+                material.base_color = Color::srgb(0.26, 0.78, 0.46);
+                material.emissive = Color::srgb(0.04, 0.10, 0.05).into();
+            }
+            "airborne" => {
+                material.base_color = Color::srgb(0.95, 0.58, 0.24);
+                material.emissive = Color::srgb(0.15, 0.08, 0.03).into();
+            }
+            _ => {
+                material.base_color = Color::srgb(0.92, 0.44, 0.24);
+                material.emissive = Color::BLACK.into();
+            }
+        }
+    }
+
+    body_transform.translation = Vec3::new(0.0, 0.9, 0.0);
+    body_transform.rotation = state.orientation;
+    body_transform.scale = match current_state {
+        "Airborne" => Vec3::new(0.92, 1.12, 0.92),
+        "Move" => Vec3::new(1.06, 0.96, 1.02),
+        _ => Vec3::ONE,
+    };
+
+    if look_state.last_error > 0.2 {
+        body_transform.translation.y += 0.03;
+    }
+}
+
 fn sync_overlay(
     controller: Single<
         (
@@ -336,10 +732,17 @@ fn sync_overlay(
         ),
         With<LabController>,
     >,
+    animation: Single<
+        (&CharacterStateMachineRuntime, &CharacterAnimationSelection),
+        With<LabController>,
+    >,
+    look_state: Single<&IkChainState, With<LabLookController>>,
     mut overlay: Single<&mut Text, With<LabOverlay>>,
+    mut diagnostics: ResMut<LabDiagnostics>,
     names: Query<&Name>,
 ) {
     let (transform, state, stats, input) = *controller;
+    let (runtime, selection) = *animation;
     let text = &mut *overlay;
 
     let ground_name = state
@@ -386,10 +789,121 @@ fn sync_overlay(
         stats.horizontal_speed
     );
     let _ = writeln!(text.0, "casts: {}", stats.shape_casts_last_tick);
+    let _ = writeln!(
+        text.0,
+        "anim: {} / {} look_err={:.3}",
+        runtime
+            .current_state
+            .as_ref()
+            .map(|value| value.0.as_str())
+            .unwrap_or("none"),
+        selection
+            .binding
+            .as_ref()
+            .map(|value| value.0.as_str())
+            .unwrap_or("none"),
+        look_state.last_error
+    );
     let _ = write!(
         text.0,
         "buffers: jump={jump_buffer} traverse={traverse_buffer}"
     );
+
+    diagnostics.controller_position = transform.translation;
+    diagnostics.movement_mode = format!("{:?}", state.movement_mode);
+    diagnostics.grounded_on = support_name;
+    diagnostics.support_angular_speed = state.support_angular_velocity.length();
+    diagnostics.current_speed = stats.current_speed;
+    diagnostics.animation_state = runtime
+        .current_state
+        .as_ref()
+        .map(|value| value.0.clone())
+        .unwrap_or_else(|| "none".into());
+    diagnostics.animation_binding = selection
+        .binding
+        .as_ref()
+        .map(|value| value.0.clone())
+        .unwrap_or_else(|| "none".into());
+    diagnostics.look_error = look_state.last_error;
+}
+
+fn sync_lab_pane(
+    mut pane: ResMut<LabPane>,
+    mut controller: Single<
+        (
+            &mut CharacterController,
+            &mut CharacterLook,
+            &mut CharacterFlying,
+            &CharacterControllerState,
+            &CharacterMotionStats,
+        ),
+        With<LabController>,
+    >,
+    mut look_controller: Single<(&mut LookAtTarget, &IkChainState), With<LabLookController>>,
+    animation: Single<
+        (&CharacterStateMachineRuntime, &CharacterAnimationSelection),
+        With<LabController>,
+    >,
+    names: Query<&Name>,
+) {
+    if pane.is_changed() && !pane.is_added() {
+        controller.0.speed = pane.speed;
+        controller.0.sprint_speed_scale = pane.sprint_speed_scale;
+        controller.0.jump_height = pane.jump_height;
+        controller.0.step_size = pane.step_size;
+        controller.0.support_rotation_policy = if pane.inherit_support_yaw {
+            SupportRotationPolicy::YawOnly
+        } else {
+            SupportRotationPolicy::None
+        };
+        controller.1.sensitivity = Vec2::splat(pane.look_sensitivity);
+        controller.2.enabled = pane.flight_enabled;
+        controller.2.speed = pane.flight_speed;
+        controller.2.collision_mode = if pane.flight_noclip {
+            FlightCollisionMode::NoClip
+        } else {
+            FlightCollisionMode::Slide
+        };
+        look_controller.0.reach_distance = Some(pane.look_distance);
+        look_controller.0.weight.rotation = pane.look_weight;
+    }
+
+    let grounded_on = controller
+        .3
+        .ground
+        .and_then(|ground| names.get(ground.entity).ok())
+        .map_or_else(|| "none".to_owned(), |name| name.as_str().to_owned());
+
+    let pane = pane.bypass_change_detection();
+    pane.speed = controller.0.speed;
+    pane.sprint_speed_scale = controller.0.sprint_speed_scale;
+    pane.jump_height = controller.0.jump_height;
+    pane.step_size = controller.0.step_size;
+    pane.look_sensitivity = controller.1.sensitivity.x;
+    pane.inherit_support_yaw =
+        controller.0.support_rotation_policy == SupportRotationPolicy::YawOnly;
+    pane.flight_enabled = controller.2.enabled;
+    pane.flight_speed = controller.2.speed;
+    pane.flight_noclip = controller.2.collision_mode == FlightCollisionMode::NoClip;
+    pane.look_distance = look_controller.0.reach_distance.unwrap_or(0.0);
+    pane.look_weight = look_controller.0.weight.rotation;
+    pane.movement_mode = format!("{:?}", controller.3.movement_mode);
+    pane.grounded_on = grounded_on;
+    pane.current_speed = controller.4.current_speed;
+    pane.support_angular_speed = controller.3.support_angular_velocity.length();
+    pane.animation_state = animation
+        .0
+        .current_state
+        .as_ref()
+        .map(|value| value.0.clone())
+        .unwrap_or_else(|| "none".into());
+    pane.animation_binding = animation
+        .1
+        .binding
+        .as_ref()
+        .map(|value| value.0.clone())
+        .unwrap_or_else(|| "none".into());
+    pane.look_error = look_controller.1.last_error;
 }
 
 fn capture_cursor(mut cursor: Single<&mut CursorOptions>) {

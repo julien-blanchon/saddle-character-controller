@@ -5,6 +5,7 @@ use bevy::prelude::*;
 pub enum MovementMode {
     Grounded,
     Airborne,
+    Flying,
     Swimming,
     Mantling,
     Sliding,

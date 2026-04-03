@@ -1,4 +1,8 @@
-use crate::{CharacterController, state::GroundContact, surfaces::SupportVelocityPolicy};
+use crate::{
+    CharacterController,
+    state::GroundContact,
+    surfaces::{SupportRotationPolicy, SupportVelocityPolicy},
+};
 use bevy::prelude::*;
 
 pub(crate) const MIN_SPEED_EPSILON: f32 = 0.001;
@@ -140,6 +144,7 @@ pub(crate) fn ground_probe_distance(
 }
 
 pub(crate) fn classify_mode(
+    can_fly: bool,
     can_swim: bool,
     water_level: crate::WaterLevel,
     ground: Option<GroundContact>,
@@ -147,6 +152,8 @@ pub(crate) fn classify_mode(
 ) -> crate::MovementMode {
     if mantle_active {
         crate::MovementMode::Mantling
+    } else if can_fly {
+        crate::MovementMode::Flying
     } else if can_swim && water_level > crate::WaterLevel::Feet {
         crate::MovementMode::Swimming
     } else if let Some(ground) = ground {
@@ -157,6 +164,16 @@ pub(crate) fn classify_mode(
         }
     } else {
         crate::MovementMode::Airborne
+    }
+}
+
+pub(crate) fn inherited_support_rotation(
+    policy: SupportRotationPolicy,
+    support_angular_velocity: Vec3,
+) -> Vec3 {
+    match policy {
+        SupportRotationPolicy::None => Vec3::ZERO,
+        SupportRotationPolicy::YawOnly => Vec3::Y * support_angular_velocity.y,
     }
 }
 

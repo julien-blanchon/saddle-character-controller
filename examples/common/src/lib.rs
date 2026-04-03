@@ -9,11 +9,13 @@ use bevy::{
 use bevy_enhanced_input::prelude::*;
 use saddle_character_controller::{
     AccumulatedInput, AscendAction, CharacterController, CharacterControllerDebugDraw,
-    CharacterControllerPlugin, CharacterControllerState, CharacterControllerSystems, CharacterLook,
-    CharacterMantle, CharacterMotionStats, CharacterPush, CharacterSwimming, CharacterWallKick,
-    CrouchAction, JumpAction, LookAction, MoveAction, MovementSurface, SprintAction,
+    CharacterControllerPlugin, CharacterControllerState, CharacterControllerSystems,
+    CharacterFlying, CharacterLook, CharacterMantle, CharacterMotionStats, CharacterPush,
+    CharacterSwimming, CharacterWallKick, CrouchAction, FlightCollisionMode, JumpAction,
+    LookAction, MoveAction, MovementSurface, SprintAction, SupportRotationPolicy,
     SupportVelocityPolicy, TraverseAction, WaterVolume,
 };
+use saddle_pane::prelude::*;
 
 #[derive(Clone, Copy, Debug, Resource)]
 pub struct DemoConfig {
@@ -131,6 +133,9 @@ struct FirstPersonCamera {
 }
 
 #[derive(Component)]
+struct DemoPlayer;
+
+#[derive(Component)]
 struct ThirdPersonCamera {
     target: Entity,
     distance: f32,
@@ -152,6 +157,76 @@ enum DemoFixedSystems {
     AnimatePlatforms,
 }
 
+#[derive(Resource, Pane)]
+#[pane(title = "Character Controller")]
+struct ControllerPane {
+    #[pane(tab = "Movement", slider, min = 4.0, max = 20.0, step = 0.1)]
+    speed: f32,
+    #[pane(tab = "Movement", slider, min = 1.0, max = 2.5, step = 0.05)]
+    sprint_speed_scale: f32,
+    #[pane(tab = "Movement", slider, min = 0.5, max = 3.0, step = 0.05)]
+    jump_height: f32,
+    #[pane(tab = "Movement", slider, min = 0.1, max = 1.2, step = 0.05)]
+    step_size: f32,
+    #[pane(tab = "Movement", slider, min = 0.0, max = 24.0, step = 0.5)]
+    air_acceleration_hz: f32,
+    #[pane(tab = "Movement", slider, min = 0.0005, max = 0.01, step = 0.0001)]
+    look_sensitivity: f32,
+    #[pane(tab = "Movement")]
+    inherit_support_yaw: bool,
+    #[pane(tab = "Traversal")]
+    flight_enabled: bool,
+    #[pane(tab = "Traversal", slider, min = 4.0, max = 30.0, step = 0.5)]
+    flight_speed: f32,
+    #[pane(tab = "Traversal")]
+    flight_noclip: bool,
+    #[pane(tab = "Runtime", monitor)]
+    movement_mode: String,
+    #[pane(tab = "Runtime", monitor)]
+    grounded: bool,
+    #[pane(tab = "Runtime", monitor)]
+    current_speed: f32,
+    #[pane(tab = "Runtime", monitor)]
+    support_entity: String,
+}
+
+impl Default for ControllerPane {
+    fn default() -> Self {
+        Self {
+            speed: 11.0,
+            sprint_speed_scale: 1.5,
+            jump_height: 1.8,
+            step_size: 0.7,
+            air_acceleration_hz: 12.0,
+            look_sensitivity: 0.0022,
+            inherit_support_yaw: true,
+            flight_enabled: false,
+            flight_speed: 14.0,
+            flight_noclip: false,
+            movement_mode: "Airborne".into(),
+            grounded: false,
+            current_speed: 0.0,
+            support_entity: "None".into(),
+        }
+    }
+}
+
+pub fn pane_plugins() -> (
+    bevy_flair::FlairPlugin,
+    bevy_input_focus::InputDispatchPlugin,
+    bevy_ui_widgets::UiWidgetsPlugins,
+    bevy_input_focus::tab_navigation::TabNavigationPlugin,
+    saddle_pane::PanePlugin,
+) {
+    (
+        bevy_flair::FlairPlugin,
+        bevy_input_focus::InputDispatchPlugin,
+        bevy_ui_widgets::UiWidgetsPlugins,
+        bevy_input_focus::tab_navigation::TabNavigationPlugin,
+        saddle_pane::PanePlugin,
+    )
+}
+
 pub fn run_demo(config: DemoConfig) -> AppExit {
     let mut app = App::new();
     app.insert_resource(config)
@@ -167,7 +242,9 @@ pub fn run_demo(config: DemoConfig) -> AppExit {
             }),
             PhysicsPlugins::default(),
             CharacterControllerPlugin::always_on(FixedUpdate),
+            pane_plugins(),
         ))
+        .register_pane::<ControllerPane>()
         .configure_sets(
             FixedUpdate,
             DemoFixedSystems::AnimatePlatforms.before(CharacterControllerSystems::Grounding),
@@ -182,6 +259,7 @@ pub fn run_demo(config: DemoConfig) -> AppExit {
             (
                 capture_cursor.run_if(input_just_pressed(MouseButton::Left)),
                 release_cursor.run_if(input_just_pressed(KeyCode::Escape)),
+                sync_controller_pane,
             ),
         )
         .add_systems(
@@ -333,6 +411,7 @@ fn spawn_primary_controller(
     };
 
     let mut swimming = None;
+    let mut flying = Some(CharacterFlying::default());
     let mut mantle = None;
     let mut wall_kick = None;
     let mut push = Some(CharacterPush::default());
@@ -383,8 +462,10 @@ fn spawn_primary_controller(
 
     let mut entity = commands.spawn((
         Name::new("Player"),
+        DemoPlayer,
         controller,
         look,
+        Visibility::Inherited,
         transform,
         actions!(CharacterController[
             (
@@ -422,6 +503,9 @@ fn spawn_primary_controller(
     if let Some(swimming) = swimming {
         entity.insert(swimming);
     }
+    if let Some(flying) = flying.take() {
+        entity.insert(flying);
+    }
     if let Some(mantle) = mantle {
         entity.insert(mantle);
     }
@@ -444,6 +528,81 @@ fn spawn_primary_controller(
     }
 
     player
+}
+
+fn sync_controller_pane(
+    mut pane: ResMut<ControllerPane>,
+    mut players: Query<
+        (
+            &mut CharacterController,
+            &mut CharacterLook,
+            &CharacterControllerState,
+            &CharacterMotionStats,
+            Option<&mut CharacterFlying>,
+        ),
+        With<DemoPlayer>,
+    >,
+) {
+    let Ok((mut controller, mut look, state, stats, flying)) = players.single_mut() else {
+        return;
+    };
+    let mut flight_snapshot = None;
+
+    if pane.is_changed() && !pane.is_added() {
+        controller.speed = pane.speed;
+        controller.sprint_speed_scale = pane.sprint_speed_scale;
+        controller.jump_height = pane.jump_height;
+        controller.step_size = pane.step_size;
+        controller.air_acceleration_hz = pane.air_acceleration_hz;
+        controller.support_rotation_policy = if pane.inherit_support_yaw {
+            SupportRotationPolicy::YawOnly
+        } else {
+            SupportRotationPolicy::None
+        };
+        look.sensitivity = Vec2::splat(pane.look_sensitivity);
+    }
+
+    if let Some(mut flying) = flying {
+        if pane.is_changed() && !pane.is_added() {
+            flying.enabled = pane.flight_enabled;
+            flying.speed = pane.flight_speed;
+            flying.collision_mode = if pane.flight_noclip {
+                FlightCollisionMode::NoClip
+            } else {
+                FlightCollisionMode::Slide
+            };
+        }
+        flight_snapshot = Some((
+            flying.enabled,
+            flying.speed,
+            matches!(flying.collision_mode, FlightCollisionMode::NoClip),
+        ));
+    }
+
+    let pane = pane.bypass_change_detection();
+    pane.speed = controller.speed;
+    pane.sprint_speed_scale = controller.sprint_speed_scale;
+    pane.jump_height = controller.jump_height;
+    pane.step_size = controller.step_size;
+    pane.air_acceleration_hz = controller.air_acceleration_hz;
+    pane.look_sensitivity = look.sensitivity.x;
+    pane.inherit_support_yaw = controller.support_rotation_policy == SupportRotationPolicy::YawOnly;
+    if let Some((enabled, speed, noclip)) = flight_snapshot {
+        pane.flight_enabled = enabled;
+        pane.flight_speed = speed;
+        pane.flight_noclip = noclip;
+    } else {
+        pane.flight_enabled = false;
+        pane.flight_speed = 0.0;
+        pane.flight_noclip = false;
+    }
+    pane.movement_mode = format!("{:?}", state.movement_mode);
+    pane.grounded = state.ground.is_some();
+    pane.current_speed = stats.current_speed;
+    pane.support_entity = stats
+        .last_support_entity
+        .map(|entity| format!("{entity:?}"))
+        .unwrap_or_else(|| "None".into());
 }
 
 fn spawn_extra_controllers(
@@ -473,6 +632,7 @@ fn spawn_extra_controllers(
                 .spawn((
                     Name::new(format!("Bot {spawned:02}")),
                     controller,
+                    Visibility::Inherited,
                     Transform::from_xyz(x, 3.0, z),
                 ))
                 .id();

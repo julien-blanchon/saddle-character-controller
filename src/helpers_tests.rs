@@ -87,6 +87,13 @@ fn support_velocity_is_applied_on_platform() {
 }
 
 #[test]
+fn support_rotation_can_be_limited_to_yaw() {
+    let inherited =
+        inherited_support_rotation(SupportRotationPolicy::YawOnly, Vec3::new(1.0, 2.0, 3.0));
+    assert_eq!(inherited, Vec3::new(0.0, 2.0, 0.0));
+}
+
+#[test]
 fn support_velocity_detach_policy_respected() {
     let inherited = support_detach_velocity(
         Vec3::new(2.0, 0.0, 0.0),
@@ -129,4 +136,20 @@ fn extreme_speed_is_clamped_or_rejected_safely() {
 fn travel_towards_respects_speed_limit() {
     let travel = travel_towards(Vec3::new(0.0, 0.0, 10.0), 4.0, 0.25);
     assert_eq!(travel, Vec3::new(0.0, 0.0, 1.0));
+}
+
+#[test]
+fn flying_mode_takes_priority_over_ground_and_water() {
+    let ground = Some(GroundContact {
+        entity: Entity::PLACEHOLDER,
+        point: Vec3::ZERO,
+        normal: Vec3::Y,
+        distance: 0.0,
+        walkable: true,
+    });
+
+    assert_eq!(
+        classify_mode(true, true, crate::WaterLevel::Head, ground, false),
+        crate::MovementMode::Flying
+    );
 }

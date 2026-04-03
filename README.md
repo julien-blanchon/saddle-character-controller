@@ -85,6 +85,7 @@ fn setup(mut commands: Commands) {
 | `AccumulatedInput` | Buffered action state consumed by the movement pipeline |
 | `CharacterLook` | Yaw/pitch and sensitivity state for camera-facing integrations |
 | `CharacterMotionStats` | Debug-friendly runtime stats such as speed, grounded time, support entity, and cast count |
+| `CharacterFlying` | Optional flying / spectator configuration with slide or no-clip collision modes |
 | `CharacterSwimming` | Optional swimming configuration |
 | `CharacterMantle` | Optional mantle / ledge-pull configuration |
 | `CharacterWallKick` | Optional wall-kick configuration |
@@ -92,6 +93,8 @@ fn setup(mut commands: Commands) {
 | `ExternalMotion` | Generic external velocity channel for wind, launchers, recoil, or gameplay impulses |
 | `MovementSurface` | Per-surface traction, acceleration, speed, jump, conveyor, and inheritance overrides |
 | `SupportVelocityPolicy` | Support inheritance mode: `None`, `Horizontal`, `Full` |
+| `SupportRotationPolicy` | Support rotation inheritance mode for moving and rotating platforms |
+| `FlightCollisionMode` | Flying collision behavior: `Slide` or `NoClip` |
 | `WaterVolume` / `WaterLevel` | Generic swim volume marker and runtime depth classification |
 | Messages | `CharacterJumped`, `CharacterLanded`, `MovementModeChanged`, `SupportBodyChanged` |
 
@@ -102,7 +105,8 @@ Supported in v0.1:
 - Quake / Source style ground acceleration, air acceleration, and friction ordering
 - Coyote time and jump input buffering
 - Capsule-based ground probing, slope classification, snap-to-ground, and step-up motion
-- Moving-platform support with detach grace and per-surface inheritance override
+- Moving-platform support with detach grace, optional yaw inheritance from rotating supports, and per-surface inheritance override
+- Optional flying / spectator mode with slide or no-clip collision handling
 - Crouch shape swap with uncrouch obstruction check
 - Swimming volumes and vertical swim input
 - Mantling and wall kicks as optional traversal layers
@@ -145,6 +149,8 @@ The runtime is staged and orderable:
 | `third_person` | Generic third-person follow camera driven from controller state | `cargo run -p saddle-character-controller-example-third-person` |
 | `stress_many_controllers` | Lightweight many-controller perf smoke | `cargo run -p saddle-character-controller-example-stress-many-controllers` |
 
+Every standalone example now includes a live `saddle-pane` debug panel so the main controller tuning values can be edited in real time without recompiling.
+
 ## Workspace Lab
 
 The standalone examples verify the shared crate in isolation. The workspace also includes a crate-local lab app for richer integration checks at
@@ -153,6 +159,9 @@ The standalone examples verify the shared crate in isolation. The workspace also
 ```bash
 cargo run -p saddle-character-controller-lab
 ```
+
+That lab now doubles as the batch integration showcase for `saddle-character-controller`,
+`saddle-character-state-machine`, and `saddle-animation-ik`: controller movement drives a simple locomotion state machine and a look-at IK rig, all exposed through the pane UI and covered by crate-local E2E scenarios.
 
 ## More Docs
 

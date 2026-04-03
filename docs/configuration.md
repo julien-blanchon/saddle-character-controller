@@ -37,7 +37,20 @@
 | `unground_speed` | `f32` | `10.0` | `0.0..50.0` | Relative upward support speed above which the controller stops treating the support as stable ground. |
 | `slide_gravity_scale` | `f32` | `1.0` | `0.2..3.0` | Gravity multiplier while standing on a steep non-walkable surface. |
 | `support_velocity_policy` | `SupportVelocityPolicy` | `Horizontal` | `None`, `Horizontal`, `Full` | Default platform-inheritance mode when the contacted surface does not override it. |
+| `support_rotation_policy` | `SupportRotationPolicy` | `YawOnly` | `None`, `YawOnly` | Default rotating-platform inheritance mode. `YawOnly` keeps the controller aligned to turntables without inheriting full pitch/roll from arbitrary supports. |
 | `support_detach_grace` | `Duration` | `120ms` | `0..250ms` | Time window during which support velocity is preserved after ground loss. |
+
+## `CharacterFlying`
+
+| Field | Type | Default | Practical Range | Effect |
+| --- | --- | --- | --- | --- |
+| `enabled` | `bool` | `false` | `false` or `true` | Enables flying mode. Flying takes priority over grounded and swimming classification. |
+| `speed` | `f32` | `14.0` | `2.0..40.0` | Base flight speed before sprint scaling. |
+| `sprint_speed_scale` | `f32` | `1.4` | `1.0..3.0` | Multiplier applied while sprint input is active during flight. |
+| `acceleration_hz` | `f32` | `8.0` | `1.0..20.0` | Flight acceleration rate toward the requested movement direction. |
+| `drag_hz` | `f32` | `6.0` | `0.0..20.0` | Flight damping applied when input relaxes or direction changes. |
+| `vertical_speed_scale` | `f32` | `1.0` | `0.0..3.0` | Scales ascend and descend input while flying. |
+| `collision_mode` | `FlightCollisionMode` | `Slide` | `Slide`, `NoClip` | `Slide` uses the normal move-and-slide path; `NoClip` moves directly through geometry for spectator-style traversal. |
 
 ## `CharacterSwimming`
 
@@ -96,6 +109,7 @@
 | `jump_multiplier` | `f32` | `1.0` | `0.0..2.0` | Scales derived jump speed from this surface. |
 | `conveyor_velocity` | `Vec3` | `Vec3::ZERO` | project-specific | Extra velocity applied from the surface itself. |
 | `inherit_velocity_policy` | `Option<SupportVelocityPolicy>` | `None` | `None`, `Some(...)` | Per-surface override for support velocity inheritance. |
+| `inherit_rotation_policy` | `Option<SupportRotationPolicy>` | `None` | `None`, `Some(...)` | Per-surface override for rotating-support inheritance. Useful when only some platforms should rotate the rider. |
 | `slide_only` | `bool` | `false` | `false` or `true` | Forces the surface to classify as non-walkable even if its normal passes the slope check. |
 
 ## `WaterVolume`
@@ -111,3 +125,4 @@
 - `ExternalMotion::velocity_delta` is a generic gameplay hook. Systems outside the crate can write to it and let the controller consume the value on the next simulation step.
 - `CharacterControllerState`, `GroundContact`, `MantleState`, and `CharacterMotionStats` are runtime-read surfaces, not tuning surfaces.
 - `CharacterControllerState` publishes the resolved `water_*_multiplier` values and `support_angular_velocity` so BRP sessions and overlays can inspect what the environment actually resolved this frame.
+- `SupportRotationPolicy` only affects how rotating supports modify facing. Linear support inheritance still uses `SupportVelocityPolicy`.

@@ -1,4 +1,7 @@
-use crate::{state::CharacterControllerState, surfaces::SupportVelocityPolicy};
+use crate::{
+    state::CharacterControllerState,
+    surfaces::{SupportRotationPolicy, SupportVelocityPolicy},
+};
 use avian3d::{
     character_controller::move_and_slide::MoveAndSlideConfig,
     parry::shape::{Capsule, SharedShape},
@@ -63,6 +66,7 @@ pub struct CharacterController {
     pub unground_speed: f32,
     pub slide_gravity_scale: f32,
     pub support_velocity_policy: SupportVelocityPolicy,
+    pub support_rotation_policy: SupportRotationPolicy,
     pub support_detach_grace: Duration,
 }
 
@@ -102,7 +106,40 @@ impl Default for CharacterController {
             unground_speed: 10.0,
             slide_gravity_scale: 1.0,
             support_velocity_policy: SupportVelocityPolicy::Horizontal,
+            support_rotation_policy: SupportRotationPolicy::YawOnly,
             support_detach_grace: Duration::from_millis(120),
+        }
+    }
+}
+
+#[derive(Reflect, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlightCollisionMode {
+    Slide,
+    NoClip,
+}
+
+#[derive(Component, Reflect, Debug, Clone)]
+#[reflect(Component, Debug)]
+pub struct CharacterFlying {
+    pub enabled: bool,
+    pub speed: f32,
+    pub sprint_speed_scale: f32,
+    pub acceleration_hz: f32,
+    pub drag_hz: f32,
+    pub vertical_speed_scale: f32,
+    pub collision_mode: FlightCollisionMode,
+}
+
+impl Default for CharacterFlying {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            speed: 14.0,
+            sprint_speed_scale: 1.4,
+            acceleration_hz: 8.0,
+            drag_hz: 6.0,
+            vertical_speed_scale: 1.0,
+            collision_mode: FlightCollisionMode::Slide,
         }
     }
 }
