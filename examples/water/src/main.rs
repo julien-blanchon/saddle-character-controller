@@ -1,7 +1,126 @@
+//! # Water / Swimming
+//!
+//! Shows the character controller transitioning between walking and swimming when
+//! entering a `WaterVolume` trigger. The controller automatically switches to swim
+//! mode: buoyancy, reduced gravity, and different movement feel.
+//!
+//! **Demonstrates**: `CharacterSwimming`, `WaterVolume`, water-to-ground transitions,
+//! `AscendAction` for swimming upward.
+
+use std::time::Duration;
+
+use bevy::prelude::*;
+use bevy_enhanced_input::prelude::*;
+use saddle_character_controller::{
+    AscendAction, CharacterController, CharacterControllerPlugin, CharacterControllerSystems,
+    CharacterFlying, CharacterLook, CharacterPush, CharacterSwimming, CrouchAction, JumpAction,
+    LookAction, MoveAction, SprintAction, TraverseAction,
+};
 use saddle_character_controller_example_common as common;
+use common::{
+    DemoFixedSystems, DemoPlayer, FirstPersonCamera, animate_platforms, follow_first_person_camera,
+    spawn_block, spawn_flat_ground, spawn_lighting, spawn_water_volume,
+};
 
-use common::DemoConfig;
+fn main() -> AppExit {
+    let mut app = common::base_app("character_controller water");
+    app.add_plugins(CharacterControllerPlugin::always_on(FixedUpdate));
 
-fn main() -> bevy::app::AppExit {
-    common::run_demo(DemoConfig::water())
+    app.configure_sets(
+        FixedUpdate,
+        DemoFixedSystems::AnimatePlatforms.before(CharacterControllerSystems::Grounding),
+    )
+    .add_systems(Startup, setup_scene)
+    .add_systems(
+        FixedUpdate,
+        animate_platforms.in_set(DemoFixedSystems::AnimatePlatforms),
+    )
+    .add_systems(PostUpdate, follow_first_person_camera);
+
+    app.run()
+}
+
+fn setup_scene(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    spawn_lighting(&mut commands);
+    spawn_flat_ground(&mut commands, &mut meshes, &mut materials, 120.0);
+
+    // Some crates to jump on near the pool edge.
+    spawn_block(&mut commands, &mut meshes, &mut materials,
+        "Crate Cluster A", Vec3::new(-4.0, 1.0, 2.0), Vec3::new(2.0, 2.0, 2.0),
+        Color::srgb(0.56, 0.39, 0.26));
+    spawn_block(&mut commands, &mut meshes, &mut materials,
+        "Crate Cluster B", Vec3::new(4.5, 0.5, -3.0), Vec3::new(3.0, 1.0, 3.0),
+        Color::srgb(0.39, 0.47, 0.62));
+    spawn_block(&mut commands, &mut meshes, &mut materials,
+        "Crate Cluster C", Vec3::new(0.0, 1.5, -10.0), Vec3::new(2.5, 3.0, 2.5),
+        Color::srgb(0.31, 0.58, 0.47));
+
+    // -- Pool ---------------------------------------------------------------
+    // A raised rim around the pool so the character must jump in or walk off the edge.
+    spawn_block(
+        &mut commands, &mut meshes, &mut materials,
+        "Pool Rim",
+        Vec3::new(6.0, 0.2, 0.0),
+        Vec3::new(18.0, 0.4, 14.0),
+        Color::srgb(0.36, 0.34, 0.31),
+    );
+
+    // The water volume is a sensor collider with the `WaterVolume` component.
+    // When the character's feet enter this volume, `CharacterSwimming` activates.
+    spawn_water_volume(
+        &mut commands, &mut meshes, &mut materials,
+        "Pool",
+        Vec3::new(6.0, 1.4, 0.0),
+        Vec3::new(12.0, 3.0, 8.0),
+    );
+
+    // -- Player character with swimming enabled -----------------------------
+    let controller = CharacterController {
+        speed: 11.0,
+        jump_input_buffer: Duration::from_millis(160),
+        coyote_time: Duration::from_millis(110),
+        ..default()
+    };
+    let look = CharacterLook {
+        sensitivity: Vec2::splat(0.0022),
+        ..default()
+    };
+
+    let player = commands.spawn((
+        Name::new("Player"),
+        DemoPlayer,
+        controller,
+        look,
+        CharacterFlying::default(),
+        CharacterPush::default(),
+        // Swimming must be added as a component for the controller to enter swim mode.
+        // Without this, the character would fall through water volumes normally.
+        CharacterSwimming::default(),
+        Visibility::Inherited,
+        Transform::from_xyz(-14.0, 3.0, 10.0),
+        actions!(CharacterController[
+            (Action::<MoveAction>::new(), DeadZone::default(), Bindings::spawn((Cardinal::wasd_keys(), Axial::left_stick()))),
+            (Action::<LookAction>::new(), Bindings::spawn((Spawn((Binding::mouse_motion(), Scale::splat(0.0025))), Axial::right_stick().with((Scale::splat(0.06), DeadZone::default()))))),
+            (Action::<JumpAction>::new(), bindings![KeyCode::Space, GamepadButton::South]),
+            (Action::<SprintAction>::new(), bindings![KeyCode::ShiftLeft, GamepadButton::LeftTrigger2]),
+            (Action::<CrouchAction>::new(), bindings![KeyCode::ControlLeft, KeyCode::KeyC, GamepadButton::East]),
+            // Q swims upward while submerged (AscendAction).
+            (Action::<AscendAction>::new(), bindings![KeyCode::KeyQ, GamepadButton::LeftTrigger]),
+            (Action::<TraverseAction>::new(), bindings![KeyCode::KeyE, GamepadButton::RightTrigger]),
+        ]),
+    )).id();
+
+    commands.spawn((
+        Name::new("First Person Camera"),
+        Camera3d::default(),
+        Projection::Perspective(PerspectiveProjection {
+            fov: std::f32::consts::TAU / 5.5,
+            ..default()
+        }),
+        FirstPersonCamera { target: player },
+    ));
 }

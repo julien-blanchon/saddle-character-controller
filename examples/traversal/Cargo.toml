@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 bevy = { workspace = true }
+bevy_enhanced_input = { workspace = true }
 saddle-character-controller = { workspace = true }
 saddle-character-controller-example-common = { path = "../common" }
 saddle-pane = { workspace = true }
