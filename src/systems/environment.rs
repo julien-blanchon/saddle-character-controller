@@ -1,34 +1,39 @@
 use crate::{
-    CharacterController, CharacterControllerState, CharacterSwimming, WaterLevel, WaterVolume,
+    CharacterController, CharacterSwimming,
+    state::{EnvironmentDepth, EnvironmentModifiers},
+    surfaces::{EnvironmentVolume, WaterVolume},
 };
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-pub(crate) fn update_water_state(
+pub(crate) fn update_environment_state(
     mut controllers: Query<(
         &Transform,
         &CharacterController,
-        &mut CharacterControllerState,
+        &crate::CharacterControllerState,
+        &mut EnvironmentModifiers,
         &CollidingEntities,
         Option<&CharacterSwimming>,
     )>,
-    waters: Query<(Entity, &Collider, &Position, &Rotation, &WaterVolume)>,
+    water_volumes: Query<(Entity, &Collider, &Position, &Rotation, &WaterVolume)>,
+    env_volumes: Query<
+        (Entity, &Collider, &Position, &Rotation, &EnvironmentVolume),
+        Without<WaterVolume>,
+    >,
 ) {
-    for (transform, controller, mut state, colliding_entities, can_swim) in &mut controllers {
+    for (transform, controller, state, mut env, colliding_entities, can_swim) in &mut controllers {
+        // Reset modifiers each tick.
+        env.depth = EnvironmentDepth::None;
+        env.active_volume = None;
+        env.speed_multiplier = 1.0;
+        env.acceleration_multiplier = 1.0;
+        env.gravity_multiplier = 1.0;
+
         if can_swim.is_none() {
-            state.water_level = WaterLevel::None;
-            state.water_volume = None;
-            state.water_speed_multiplier = 1.0;
-            state.water_acceleration_multiplier = 1.0;
-            state.water_gravity_multiplier = 1.0;
-            continue;
+            // Without CharacterSwimming, the controller ignores swim volumes.
+            // Generic EnvironmentVolumes still apply their multipliers.
         }
 
-        state.water_level = WaterLevel::None;
-        state.water_volume = None;
-        state.water_speed_multiplier = 1.0;
-        state.water_acceleration_multiplier = 1.0;
-        state.water_gravity_multiplier = 1.0;
         let center = transform.translation;
         let eye = center
             + Vec3::Y
@@ -38,30 +43,62 @@ pub(crate) fn update_water_state(
                     controller.standing_view_height
                 };
 
+        // Process WaterVolume overlaps.
         for (water_entity, collider, position, rotation, water) in
-            waters.iter_many(colliding_entities.iter())
+            water_volumes.iter_many(colliding_entities.iter())
+        {
+            if can_swim.is_none() {
+                continue;
+            }
+            let level = if collider.contains_point(position.0, rotation.0, eye) {
+                EnvironmentDepth::Submerged
+            } else if collider.contains_point(position.0, rotation.0, center) {
+                EnvironmentDepth::Medium
+            } else {
+                EnvironmentDepth::Shallow
+            };
+            if level > env.depth {
+                env.depth = level;
+                env.active_volume = Some(water_entity);
+                env.speed_multiplier = water.speed_multiplier;
+                env.acceleration_multiplier = water.acceleration_multiplier;
+                env.gravity_multiplier = water.gravity_multiplier;
+            } else if level == env.depth && level > EnvironmentDepth::None {
+                env.speed_multiplier = env.speed_multiplier.min(water.speed_multiplier);
+                env.acceleration_multiplier = env
+                    .acceleration_multiplier
+                    .min(water.acceleration_multiplier);
+                env.gravity_multiplier = env.gravity_multiplier.min(water.gravity_multiplier);
+            }
+        }
+
+        // Process generic EnvironmentVolume overlaps.
+        for (env_entity, collider, position, rotation, volume) in
+            env_volumes.iter_many(colliding_entities.iter())
         {
             let level = if collider.contains_point(position.0, rotation.0, eye) {
-                WaterLevel::Head
+                EnvironmentDepth::Submerged
             } else if collider.contains_point(position.0, rotation.0, center) {
-                WaterLevel::Waist
+                EnvironmentDepth::Medium
             } else {
-                WaterLevel::Feet
+                EnvironmentDepth::Shallow
             };
-            if level > state.water_level {
-                state.water_level = level;
-                state.water_volume = Some(water_entity);
-                state.water_speed_multiplier = water.speed_multiplier;
-                state.water_acceleration_multiplier = water.acceleration_multiplier;
-                state.water_gravity_multiplier = water.gravity_multiplier;
-            } else if level == state.water_level && level > WaterLevel::None {
-                state.water_speed_multiplier =
-                    state.water_speed_multiplier.min(water.speed_multiplier);
-                state.water_acceleration_multiplier = state
-                    .water_acceleration_multiplier
-                    .min(water.acceleration_multiplier);
-                state.water_gravity_multiplier =
-                    state.water_gravity_multiplier.min(water.gravity_multiplier);
+            // For swim volumes, require CharacterSwimming.
+            if volume.swim_volume && can_swim.is_none() {
+                continue;
+            }
+            if level > env.depth {
+                env.depth = level;
+                env.active_volume = Some(env_entity);
+                env.speed_multiplier = volume.speed_multiplier;
+                env.acceleration_multiplier = volume.acceleration_multiplier;
+                env.gravity_multiplier = volume.gravity_multiplier;
+            } else if level == env.depth && level > EnvironmentDepth::None {
+                env.speed_multiplier = env.speed_multiplier.min(volume.speed_multiplier);
+                env.acceleration_multiplier = env
+                    .acceleration_multiplier
+                    .min(volume.acceleration_multiplier);
+                env.gravity_multiplier = env.gravity_multiplier.min(volume.gravity_multiplier);
             }
         }
     }

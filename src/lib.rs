@@ -7,18 +7,22 @@ mod surfaces;
 mod systems;
 
 pub use components::{
-    CharacterController, CharacterFlying, CharacterLook, CharacterMantle, CharacterMotionStats,
-    CharacterPush, CharacterSwimming, CharacterWallKick, ExternalMotion, FlightCollisionMode,
+    CharacterController, CharacterDash, CharacterFlying, CharacterGravity, CharacterLook,
+    CharacterMantle, CharacterMotionStats, CharacterPreset, CharacterPush, CharacterSwimming,
+    CharacterWallKick, ExternalMotion, FlightCollisionMode,
 };
 pub use input::{
-    AccumulatedInput, AscendAction, CrouchAction, JumpAction, LookAction, MoveAction, SprintAction,
-    TraverseAction,
+    AccumulatedInput, AscendAction, CrouchAction, DashAction, JumpAction, LookAction, MoveAction,
+    SprintAction, TraverseAction,
 };
 pub use messages::{CharacterJumped, CharacterLanded, MovementModeChanged, SupportBodyChanged};
-pub use state::{CharacterControllerState, GroundContact, MantleState, MovementMode};
+pub use state::{
+    CharacterControllerState, ControllerMode, DashState, EnvironmentDepth, EnvironmentModifiers,
+    GroundContact, MantleState, MovementMode, WaterLevel,
+};
 pub use surfaces::{
-    CharacterControllerDebugDraw, MovementSurface, SupportRotationPolicy, SupportVelocityPolicy,
-    WaterLevel, WaterVolume,
+    CharacterControllerDebugDraw, EnvironmentVolume, MovementSurface, SupportRotationPolicy,
+    SupportVelocityPolicy, WaterVolume,
 };
 
 use bevy::{
@@ -81,13 +85,20 @@ impl Plugin for CharacterControllerPlugin {
             .register_type::<AccumulatedInput>()
             .register_type::<CharacterController>()
             .register_type::<CharacterControllerState>()
+            .register_type::<CharacterDash>()
             .register_type::<CharacterFlying>()
+            .register_type::<CharacterGravity>()
             .register_type::<CharacterLook>()
             .register_type::<CharacterMantle>()
             .register_type::<CharacterMotionStats>()
             .register_type::<CharacterPush>()
             .register_type::<CharacterSwimming>()
             .register_type::<CharacterWallKick>()
+            .register_type::<ControllerMode>()
+            .register_type::<DashState>()
+            .register_type::<EnvironmentDepth>()
+            .register_type::<EnvironmentModifiers>()
+            .register_type::<EnvironmentVolume>()
             .register_type::<ExternalMotion>()
             .register_type::<FlightCollisionMode>()
             .register_type::<GroundContact>()
@@ -97,13 +108,15 @@ impl Plugin for CharacterControllerPlugin {
             .register_type::<MovementSurface>()
             .register_type::<SupportRotationPolicy>()
             .register_type::<SupportVelocityPolicy>()
-            .register_type::<WaterLevel>()
             .register_type::<WaterVolume>()
             .add_observer(input::cache_move_axis)
             .add_observer(input::clear_move_axis_on_cancel)
             .add_observer(input::clear_move_axis_on_complete)
             .add_observer(input::cache_jump_press)
+            .add_observer(input::clear_jump_held_on_cancel)
+            .add_observer(input::clear_jump_held_on_complete)
             .add_observer(input::cache_traverse_press)
+            .add_observer(input::cache_dash_press)
             .add_observer(input::cache_sprint_active)
             .add_observer(input::clear_sprint_active_on_cancel)
             .add_observer(input::clear_sprint_active_on_complete)
@@ -144,7 +157,7 @@ impl Plugin for CharacterControllerPlugin {
                         .in_set(CharacterControllerSystems::PreMovement),
                     systems::prepare::refresh_character_shapes
                         .in_set(CharacterControllerSystems::PreMovement),
-                    systems::environment::update_water_state
+                    systems::environment::update_environment_state
                         .in_set(CharacterControllerSystems::Grounding),
                     systems::movement::run_controllers.in_set(CharacterControllerSystems::Movement),
                     systems::finalize::apply_push_forces

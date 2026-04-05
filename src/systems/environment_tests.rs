@@ -2,14 +2,15 @@ use avian3d::prelude::*;
 use bevy::{ecs::entity::EntityHashSet, prelude::*};
 
 use crate::{
-    CharacterController, CharacterControllerState, CharacterSwimming, WaterLevel, WaterVolume,
+    CharacterController, CharacterControllerState, CharacterSwimming, WaterVolume,
+    state::{EnvironmentDepth, EnvironmentModifiers},
 };
 
 #[test]
 fn water_state_uses_deepest_overlap_and_applies_volume_multipliers() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
-        .add_systems(Update, super::update_water_state);
+        .add_systems(Update, super::update_environment_state);
 
     let shallow = app
         .world_mut()
@@ -47,6 +48,7 @@ fn water_state_uses_deepest_overlap_and_applies_volume_multipliers() {
         .spawn((
             CharacterController::default(),
             CharacterControllerState::default(),
+            EnvironmentModifiers::default(),
             CharacterSwimming::default(),
             Transform::from_xyz(0.0, 0.5, 0.0),
             CollidingEntities(overlaps),
@@ -55,22 +57,22 @@ fn water_state_uses_deepest_overlap_and_applies_volume_multipliers() {
 
     app.update();
 
-    let state = app
+    let env = app
         .world()
-        .get::<CharacterControllerState>(controller)
-        .expect("controller state should exist");
-    assert_eq!(state.water_level, WaterLevel::Head);
-    assert_eq!(state.water_volume, Some(deep));
-    assert!((state.water_speed_multiplier - 0.45).abs() < 0.0001);
-    assert!((state.water_acceleration_multiplier - 0.6).abs() < 0.0001);
-    assert!((state.water_gravity_multiplier - 0.35).abs() < 0.0001);
+        .get::<EnvironmentModifiers>(controller)
+        .expect("environment modifiers should exist");
+    assert_eq!(env.depth, EnvironmentDepth::Submerged);
+    assert_eq!(env.active_volume, Some(deep));
+    assert!((env.speed_multiplier - 0.45).abs() < 0.0001);
+    assert!((env.acceleration_multiplier - 0.6).abs() < 0.0001);
+    assert!((env.gravity_multiplier - 0.35).abs() < 0.0001);
 }
 
 #[test]
 fn water_state_resets_when_swimming_is_disabled() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
-        .add_systems(Update, super::update_water_state);
+        .add_systems(Update, super::update_environment_state);
 
     let water = app
         .world_mut()
@@ -89,17 +91,18 @@ fn water_state_resets_when_swimming_is_disabled() {
     let mut overlaps = EntityHashSet::default();
     overlaps.insert(water);
 
+    // No CharacterSwimming component → should reset to defaults.
     let controller = app
         .world_mut()
         .spawn((
             CharacterController::default(),
-            CharacterControllerState {
-                water_level: WaterLevel::Head,
-                water_volume: Some(water),
-                water_speed_multiplier: 0.2,
-                water_acceleration_multiplier: 0.3,
-                water_gravity_multiplier: 0.4,
-                ..default()
+            CharacterControllerState::default(),
+            EnvironmentModifiers {
+                depth: EnvironmentDepth::Submerged,
+                active_volume: Some(water),
+                speed_multiplier: 0.2,
+                acceleration_multiplier: 0.3,
+                gravity_multiplier: 0.4,
             },
             Transform::from_xyz(0.0, 0.5, 0.0),
             CollidingEntities(overlaps),
@@ -108,13 +111,13 @@ fn water_state_resets_when_swimming_is_disabled() {
 
     app.update();
 
-    let state = app
+    let env = app
         .world()
-        .get::<CharacterControllerState>(controller)
-        .expect("controller state should exist");
-    assert_eq!(state.water_level, WaterLevel::None);
-    assert_eq!(state.water_volume, None);
-    assert_eq!(state.water_speed_multiplier, 1.0);
-    assert_eq!(state.water_acceleration_multiplier, 1.0);
-    assert_eq!(state.water_gravity_multiplier, 1.0);
+        .get::<EnvironmentModifiers>(controller)
+        .expect("environment modifiers should exist");
+    assert_eq!(env.depth, EnvironmentDepth::None);
+    assert_eq!(env.active_volume, None);
+    assert_eq!(env.speed_multiplier, 1.0);
+    assert_eq!(env.acceleration_multiplier, 1.0);
+    assert_eq!(env.gravity_multiplier, 1.0);
 }

@@ -146,15 +146,18 @@ pub(crate) fn ground_probe_distance(
 pub(crate) fn classify_mode(
     can_fly: bool,
     can_swim: bool,
-    water_level: crate::WaterLevel,
+    env_depth: crate::EnvironmentDepth,
     ground: Option<GroundContact>,
     mantle_active: bool,
+    dash_active: bool,
 ) -> crate::MovementMode {
-    if mantle_active {
+    if dash_active {
+        crate::MovementMode::Dashing
+    } else if mantle_active {
         crate::MovementMode::Mantling
     } else if can_fly {
         crate::MovementMode::Flying
-    } else if can_swim && water_level > crate::WaterLevel::Feet {
+    } else if can_swim && env_depth > crate::EnvironmentDepth::Shallow {
         crate::MovementMode::Swimming
     } else if let Some(ground) = ground {
         if ground.walkable {

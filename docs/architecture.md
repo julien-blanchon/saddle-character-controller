@@ -16,6 +16,10 @@ Optional abilities are additive components:
 - `CharacterMantle`
 - `CharacterWallKick`
 - `CharacterPush`
+- `CharacterDash`
+- `CharacterGravity`
+
+Environment interaction is handled by a separate `EnvironmentModifiers` component (required, auto-added) that decouples volume detection from the core state struct.
 
 That keeps the base crate useful for a plain FPS or exploration controller without forcing every consumer into every advanced feature.
 
@@ -34,13 +38,13 @@ Within that flow, the runtime currently does:
 
 1. Tick buffered jump / traverse timers.
 2. Initialize newly added controllers and refresh active collider shapes.
-3. Classify water depth from overlapping `WaterVolume` sensors.
+3. Classify environment depth from overlapping `WaterVolume` and `EnvironmentVolume` sensors into `EnvironmentModifiers`.
 4. Depenetrate stale overlaps.
 5. Probe ground using the active capsule.
 6. Resolve support-body velocity and detach grace.
 7. Resolve crouch shape transitions.
 8. Expire stale buffered actions.
-9. Apply movement-mode-specific acceleration, friction, gravity, jump, flying, mantle, wall-kick, and slide motion.
+9. Apply movement-mode-specific acceleration, friction, gravity, jump, flying, mantle, wall-kick, dash, and slide motion.
 10. Re-probe ground after motion and update support attachment.
 11. Publish movement messages and clear per-frame look accumulation.
 12. Draw optional debug gizmos in `PostUpdate`.
@@ -63,7 +67,8 @@ The controller itself only owns logical movement state:
 
 - current movement mode
 - support velocity and support entity
-- water level
+- environment depth and modifiers (via `EnvironmentModifiers`)
+- air jump count and dash state
 - mantle target
 - view orientation
 
@@ -118,7 +123,11 @@ The controller stays extensible by keeping optional features in their own compon
 - `CharacterSwimming` enables swim-mode acceleration, gravity, and ascend input
 - `CharacterMantle` enables buffered ledge traversal attempts
 - `CharacterWallKick` enables wall-based jump redirects
+- `CharacterDash` enables a configurable dash ability with cooldown, air dash budget, and optional gravity cancel
+- `CharacterGravity` overrides the default gravity magnitude and direction per entity
 - `CharacterPush` enables contact-driven rigidbody impulses
 - `ExternalMotion` provides a generic velocity-delta channel for gameplay code
+
+Environment volumes (`WaterVolume`, `EnvironmentVolume`) feed into the `EnvironmentModifiers` component, which is separate from `CharacterControllerState`. This decoupling means environment detection can evolve independently and consumers can query environment state without pulling in the full controller state.
 
 This pattern keeps the public API configuration-driven instead of accumulating a single monolithic movement struct.

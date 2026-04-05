@@ -8,7 +8,9 @@ pub struct AccumulatedInput {
     pub move_axis: Vec2,
     pub look_axis: Vec2,
     pub jump_pressed_for: Option<f32>,
+    pub jump_held: bool,
     pub traverse_pressed_for: Option<f32>,
+    pub dash_pressed_for: Option<f32>,
     pub sprint_active: bool,
     pub crouch_active: bool,
     pub ascend_active: bool,
@@ -41,6 +43,10 @@ pub struct AscendAction;
 #[derive(Debug, InputAction)]
 #[action_output(bool)]
 pub struct TraverseAction;
+
+#[derive(Debug, InputAction)]
+#[action_output(bool)]
+pub struct DashAction;
 
 pub(crate) fn cache_move_axis(
     trigger: On<Fire<MoveAction>>,
@@ -75,6 +81,34 @@ pub(crate) fn cache_jump_press(
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
         input.jump_pressed_for = Some(0.0);
+        input.jump_held = true;
+    }
+}
+
+pub(crate) fn clear_jump_held_on_cancel(
+    trigger: On<InputCancel<JumpAction>>,
+    mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
+) {
+    if let Ok(mut input) = query.get_mut(trigger.context) {
+        input.jump_held = false;
+    }
+}
+
+pub(crate) fn clear_jump_held_on_complete(
+    trigger: On<Complete<JumpAction>>,
+    mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
+) {
+    if let Ok(mut input) = query.get_mut(trigger.context) {
+        input.jump_held = false;
+    }
+}
+
+pub(crate) fn cache_dash_press(
+    trigger: On<Start<DashAction>>,
+    mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
+) {
+    if let Ok(mut input) = query.get_mut(trigger.context) {
+        input.dash_pressed_for = Some(0.0);
     }
 }
 
@@ -220,6 +254,9 @@ pub(crate) fn tick_input_buffers(mut query: Query<&mut AccumulatedInput>, time: 
             *age += dt;
         }
         if let Some(age) = input.traverse_pressed_for.as_mut() {
+            *age += dt;
+        }
+        if let Some(age) = input.dash_pressed_for.as_mut() {
             *age += dt;
         }
     }

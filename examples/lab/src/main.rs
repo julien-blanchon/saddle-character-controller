@@ -729,6 +729,7 @@ fn sync_overlay(
             &CharacterControllerState,
             &CharacterMotionStats,
             &AccumulatedInput,
+            &saddle_character_controller::EnvironmentModifiers,
         ),
         With<LabController>,
     >,
@@ -741,7 +742,7 @@ fn sync_overlay(
     mut diagnostics: ResMut<LabDiagnostics>,
     names: Query<&Name>,
 ) {
-    let (transform, state, stats, input) = *controller;
+    let (transform, state, stats, input, env) = *controller;
     let (runtime, selection) = *animation;
     let text = &mut *overlay;
 
@@ -773,11 +774,11 @@ fn sync_overlay(
     );
     let _ = writeln!(
         text.0,
-        "water: {:?} speed={:.2} accel={:.2} gravity={:.2}",
-        state.water_level,
-        state.water_speed_multiplier,
-        state.water_acceleration_multiplier,
-        state.water_gravity_multiplier
+        "env: {:?} speed={:.2} accel={:.2} gravity={:.2}",
+        env.depth,
+        env.speed_multiplier,
+        env.acceleration_multiplier,
+        env.gravity_multiplier
     );
     let _ = writeln!(
         text.0,

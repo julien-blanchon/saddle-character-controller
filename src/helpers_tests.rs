@@ -149,7 +149,14 @@ fn flying_mode_takes_priority_over_ground_and_water() {
     });
 
     assert_eq!(
-        classify_mode(true, true, crate::WaterLevel::Head, ground, false),
+        classify_mode(
+            true,
+            true,
+            crate::EnvironmentDepth::Submerged,
+            ground,
+            false,
+            false
+        ),
         crate::MovementMode::Flying
     );
 }

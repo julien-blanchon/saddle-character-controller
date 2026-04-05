@@ -81,7 +81,7 @@ fn setup(mut commands: Commands) {
 | `CharacterControllerPlugin` | Registers the controller runtime with injectable activate, deactivate, and update schedules |
 | `CharacterControllerSystems` | Public ordering hooks: `ReadInput`, `PreMovement`, `Grounding`, `Movement`, `PostMovement`, `Presentation` |
 | `CharacterController` | Core movement tuning and shape configuration |
-| `CharacterControllerState` | Readable runtime state: mode, ground contact, support motion, crouch state, resolved water modifiers, and mantle state |
+| `CharacterControllerState` | Readable runtime state: mode, ground contact, support motion, crouch state, air jump tracking, dash state, and mantle state |
 | `AccumulatedInput` | Buffered action state consumed by the movement pipeline |
 | `CharacterLook` | Yaw/pitch and sensitivity state for camera-facing integrations |
 | `CharacterMotionStats` | Debug-friendly runtime stats such as speed, grounded time, support entity, and cast count |
@@ -89,13 +89,19 @@ fn setup(mut commands: Commands) {
 | `CharacterSwimming` | Optional swimming configuration |
 | `CharacterMantle` | Optional mantle / ledge-pull configuration |
 | `CharacterWallKick` | Optional wall-kick configuration |
+| `CharacterDash` | Optional dash ability with configurable speed, duration, cooldown, and air dash budget |
+| `CharacterGravity` | Optional per-entity gravity override (magnitude and direction) |
 | `CharacterPush` | Optional rigidbody push hook |
 | `ExternalMotion` | Generic external velocity channel for wind, launchers, recoil, or gameplay impulses |
+| `EnvironmentModifiers` | Runtime environment state: depth classification, active volume, and speed/acceleration/gravity multipliers |
+| `EnvironmentVolume` | Generic environment volume with configurable multipliers and optional swim behavior |
+| `ControllerMode` | Toggle controller behavior: `Enabled`, `SenseOnly` (probe-only), or `Disabled` |
+| `CharacterPreset` | Factory methods for common controller configurations: `default_fps()`, `platformer()`, `explorer()`, `arena()` |
 | `MovementSurface` | Per-surface traction, acceleration, speed, jump, conveyor, and inheritance overrides |
 | `SupportVelocityPolicy` | Support inheritance mode: `None`, `Horizontal`, `Full` |
 | `SupportRotationPolicy` | Support rotation inheritance mode for moving and rotating platforms |
 | `FlightCollisionMode` | Flying collision behavior: `Slide` or `NoClip` |
-| `WaterVolume` / `WaterLevel` | Generic swim volume marker and runtime depth classification |
+| `WaterVolume` | Convenience swim volume marker with per-volume speed/acceleration/gravity multipliers |
 | Messages | `CharacterJumped`, `CharacterLanded`, `MovementModeChanged`, `SupportBodyChanged` |
 
 ## Current Feature Scope
@@ -104,14 +110,21 @@ Supported in v0.1:
 
 - Quake / Source style ground acceleration, air acceleration, and friction ordering
 - Coyote time and jump input buffering
+- Variable-height jump (extra gravity on early button release for responsive feel)
+- Air jump tracking (configurable double/triple jumps via `max_air_jumps`)
+- Dash ability as optional composable component with cooldown, air dash budget, and gravity cancel
 - Capsule-based ground probing, slope classification, snap-to-ground, and step-up motion
 - Moving-platform support with detach grace, optional yaw inheritance from rotating supports, and per-surface inheritance override
 - Optional flying / spectator mode with slide or no-clip collision handling
 - Crouch shape swap with uncrouch obstruction check
-- Swimming volumes and vertical swim input
+- Generic environment volumes with per-volume speed/acceleration/gravity multipliers (replaces hardcoded water state)
+- Swimming volumes and vertical swim input (now built on the generic `EnvironmentVolume` system)
 - Mantling and wall kicks as optional traversal layers
 - Per-surface movement modifiers and conveyor velocity
 - Push impulses into dynamic rigidbodies
+- Per-entity gravity override (`CharacterGravity` component)
+- Controller mode toggle (`Enabled` / `SenseOnly` / `Disabled`)
+- Configuration presets for common game types (`CharacterPreset::platformer()`, etc.)
 - Runtime state reflection and optional debug gizmos
 
 Deferred or intentionally minimal in v0.1:
@@ -119,7 +132,6 @@ Deferred or intentionally minimal in v0.1:
 - Ladder / climb-volume support
 - Slide crouch and prone-style extra shape profiles
 - Root-motion hooks and animation graph integration
-- Custom gravity directions
 - Built-in pickup / carry logic
 - Deterministic serialization and prediction helpers
 

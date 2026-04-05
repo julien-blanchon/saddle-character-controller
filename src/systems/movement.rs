@@ -1,9 +1,9 @@
 use crate::{
     CharacterController, CharacterControllerState, CharacterMantle, ExternalMotion,
     components::{
-        CharacterColliderCache, CharacterControllerScratch, CharacterFlying, CharacterLook,
-        CharacterMotionStats, CharacterPush, CharacterSwimming, CharacterWallKick,
-        FlightCollisionMode, PendingLanding,
+        CharacterColliderCache, CharacterControllerScratch, CharacterDash, CharacterFlying,
+        CharacterGravity, CharacterLook, CharacterMotionStats, CharacterPush, CharacterSwimming,
+        CharacterWallKick, FlightCollisionMode, PendingLanding,
     },
     helpers::{
         ages_recently, apply_ground_friction, clamp_velocity, classify_mode, expire_old,
@@ -13,8 +13,11 @@ use crate::{
         travel_towards, wish_velocity_3d, wish_velocity_from_input,
     },
     input::AccumulatedInput,
-    state::{GroundContact, MantleState},
-    surfaces::{MovementSurface, SupportRotationPolicy, SupportVelocityPolicy, WaterLevel},
+    state::{
+        ControllerMode, DashState, EnvironmentDepth, EnvironmentModifiers, GroundContact,
+        MantleState,
+    },
+    surfaces::{MovementSurface, SupportRotationPolicy, SupportVelocityPolicy},
 };
 use avian3d::{
     character_controller::move_and_slide::{DepenetrationConfig, MoveAndSlideHitResponse},
@@ -69,12 +72,17 @@ type ControllerQuery<'w, 's> = Query<
         &'static mut Transform,
         &'static CharacterColliderCache,
         &'static mut CharacterControllerScratch,
+        &'static EnvironmentModifiers,
         Option<&'static CharacterFlying>,
         Option<&'static CharacterMantle>,
         Option<&'static CharacterWallKick>,
         Option<&'static CharacterSwimming>,
-        Option<&'static CharacterPush>,
-        Option<&'static mut ExternalMotion>,
+        (
+            Option<&'static CharacterPush>,
+            Option<&'static mut ExternalMotion>,
+            Option<&'static mut CharacterDash>,
+            Option<&'static CharacterGravity>,
+        ),
     ),
 >;
 
@@ -124,14 +132,61 @@ pub(crate) fn run_controllers(
         mut transform,
         cache,
         mut scratch,
+        env,
         flying,
         mantle,
         wall_kick,
         swimming,
-        _push,
-        external_motion,
+        (_push, external_motion, mut dash, gravity_override),
     ) in &mut controllers
     {
+        // --- Controller mode gate ---
+        match controller.controller_mode {
+            ControllerMode::Disabled => continue,
+            ControllerMode::SenseOnly => {
+                // Only do grounding probes, skip movement.
+                let probe = ground_probe(
+                    entity,
+                    controller,
+                    &move_and_slide,
+                    &surfaces,
+                    &support_colliders,
+                    cache,
+                    &state,
+                    &transform,
+                    state.support_velocity,
+                    dt,
+                    &mut stats,
+                );
+                apply_support_state(
+                    controller,
+                    &mut state,
+                    probe,
+                    &support_colliders,
+                    &support_bodies,
+                    &surfaces,
+                    dt,
+                );
+                if state.ground.is_some_and(|ground| ground.walkable) {
+                    state.grounded_frames = state.grounded_frames.saturating_add(1);
+                    state.time_since_grounded = 0.0;
+                } else {
+                    state.grounded_frames = 0;
+                    state.time_since_grounded += dt;
+                }
+                state.movement_mode = classify_mode(
+                    flying.is_some_and(|flight| flight.enabled),
+                    swimming.is_some(),
+                    env.depth,
+                    state.ground,
+                    state.mantle.is_some(),
+                    state.dash.is_some(),
+                );
+                continue;
+            }
+            ControllerMode::Enabled => { /* fall through to full simulation */ }
+        }
+
         let mut look = looks.get_mut(entity).ok();
         scratch.contacts.clear();
         scratch.pending_jump = false;
@@ -160,6 +215,11 @@ pub(crate) fn run_controllers(
 
         state.time_since_wall_kick += dt;
         state.detach_time += dt;
+
+        // Tick dash cooldown timer.
+        if let Some(dash_cfg) = dash.as_deref_mut() {
+            dash_cfg.time_since_dash += dt;
+        }
 
         let pre_move_ground = ground_probe(
             entity,
@@ -229,6 +289,10 @@ pub(crate) fn run_controllers(
                 mantle.input_buffer.as_secs_f32(),
             );
         }
+        // Expire dash input buffer using the dash cooldown as the window.
+        if let Some(dash_cfg) = dash.as_ref() {
+            expire_old(&mut input.dash_pressed_for, dash_cfg.cooldown.as_secs_f32());
+        }
 
         let support_velocity = if state.ground.is_some_and(|ground| ground.walkable) {
             inherited_support_velocity(
@@ -269,6 +333,21 @@ pub(crate) fn run_controllers(
                     &mut stats,
                 );
             }
+        } else if state.dash.is_some() {
+            // Active dash: advance it.
+            advance_dash(
+                entity,
+                controller,
+                cache,
+                &move_and_slide,
+                dt,
+                &mut state,
+                &mut linear_velocity,
+                &mut transform,
+                &mut scratch,
+                &mut stats,
+                dash.as_deref_mut(),
+            );
         } else {
             let surface_profile = pre_move_ground
                 .map(|ground| {
@@ -281,7 +360,7 @@ pub(crate) fn run_controllers(
             let mut wish_velocity_3d =
                 wish_velocity_3d(state.orientation, input.move_axis, move_speed);
 
-            if state.water_level > WaterLevel::Feet {
+            if env.depth > EnvironmentDepth::Shallow {
                 if input.ascend_active {
                     let vertical = swimming
                         .unwrap_or(&CharacterSwimming::default())
@@ -292,7 +371,23 @@ pub(crate) fn run_controllers(
                 wish_velocity_3d = wish_velocity_3d.clamp_length_max(move_speed);
             }
 
-            if let Some(flying) = flying.filter(|flight| flight.enabled) {
+            // Try to start a dash before normal movement.
+            if try_start_dash(controller, &mut state, &mut input, &mut dash, wish_velocity) {
+                // Dash just started; advance it for this tick.
+                advance_dash(
+                    entity,
+                    controller,
+                    cache,
+                    &move_and_slide,
+                    dt,
+                    &mut state,
+                    &mut linear_velocity,
+                    &mut transform,
+                    &mut scratch,
+                    &mut stats,
+                    dash.as_deref_mut(),
+                );
+            } else if let Some(flying) = flying.filter(|flight| flight.enabled) {
                 fly_move(
                     entity,
                     controller,
@@ -325,8 +420,12 @@ pub(crate) fn run_controllers(
                     continue;
                 }
 
+                let effective_gravity = gravity_override
+                    .map(|g| g.magnitude)
+                    .unwrap_or(controller.gravity);
+
                 let jump_speed =
-                    jump_velocity_for_height(controller.gravity, controller.jump_height)
+                    jump_velocity_for_height(effective_gravity, controller.jump_height)
                         * surface_profile.jump_multiplier;
                 let pre_jump_vertical_speed = linear_velocity.y;
                 let jumped = try_jump(
@@ -348,7 +447,7 @@ pub(crate) fn run_controllers(
                     state.last_jump_speed = jump_speed;
                 }
 
-                if let Some(swim) = swimming.filter(|_| state.water_level > WaterLevel::Feet) {
+                if let Some(swim) = swimming.filter(|_| env.depth > EnvironmentDepth::Shallow) {
                     water_move(
                         entity,
                         controller,
@@ -358,6 +457,7 @@ pub(crate) fn run_controllers(
                         dt,
                         support_velocity,
                         wish_velocity_3d,
+                        env,
                         &mut linear_velocity,
                         &mut transform,
                         &mut state,
@@ -407,15 +507,19 @@ pub(crate) fn run_controllers(
                     );
                 }
 
-                if state.water_level <= WaterLevel::Feet {
+                if env.depth <= EnvironmentDepth::Shallow {
                     let gravity_scale = if state.ground.is_some_and(|ground| !ground.walkable) {
                         controller.slide_gravity_scale
+                    } else if !input.jump_held && linear_velocity.y > 0.0 {
+                        // Variable-height jump: apply stronger gravity when jump
+                        // button is released during ascent.
+                        controller.jump_cut_gravity_multiplier
                     } else if linear_velocity.y < 0.0 {
                         controller.fall_gravity_multiplier
                     } else {
                         1.0
                     };
-                    linear_velocity.y -= controller.gravity * gravity_scale * 0.5 * dt;
+                    linear_velocity.y -= effective_gravity * gravity_scale * 0.5 * dt;
                 }
                 linear_velocity.y = linear_velocity.y.max(-controller.terminal_velocity);
                 let _ = pre_jump_vertical_speed;
@@ -484,6 +588,12 @@ pub(crate) fn run_controllers(
         if state.ground.is_some_and(|ground| ground.walkable) {
             state.grounded_frames = state.grounded_frames.saturating_add(1);
             state.time_since_grounded = 0.0;
+            // Reset air jumps on landing.
+            state.air_jumps_used = 0;
+            // Reset air dashes on landing.
+            if let Some(dash_cfg) = dash.as_deref_mut() {
+                dash_cfg.air_dashes_used = 0;
+            }
         } else {
             state.grounded_frames = 0;
             state.time_since_grounded += dt;
@@ -507,9 +617,10 @@ pub(crate) fn run_controllers(
         state.movement_mode = classify_mode(
             flying.is_some_and(|flight| flight.enabled),
             swimming.is_some(),
-            state.water_level,
+            env.depth,
             state.ground,
             state.mantle.is_some(),
+            state.dash.is_some(),
         );
         if state.movement_mode != scratch.previous_mode {
             scratch.pending_mode_change = Some((scratch.previous_mode, state.movement_mode));
@@ -530,6 +641,117 @@ pub(crate) fn run_controllers(
         linear_velocity.0 = clamp_velocity(linear_velocity.0, controller.max_speed);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Dash helpers
+// ---------------------------------------------------------------------------
+
+/// Attempt to begin a dash. Returns `true` if a dash was started.
+fn try_start_dash(
+    _controller: &CharacterController,
+    state: &mut CharacterControllerState,
+    input: &mut AccumulatedInput,
+    dash: &mut Option<Mut<CharacterDash>>,
+    wish_velocity: Vec3,
+) -> bool {
+    let Some(dash_cfg) = dash.as_deref_mut() else {
+        return false;
+    };
+    // Already dashing?
+    if state.dash.is_some() {
+        return false;
+    }
+    // Input buffered?
+    if !ages_recently(input.dash_pressed_for, dash_cfg.cooldown.as_secs_f32()) {
+        return false;
+    }
+    // Cooldown check.
+    if dash_cfg.time_since_dash < dash_cfg.cooldown.as_secs_f32() {
+        return false;
+    }
+    // Air dash budget.
+    let grounded = state.ground.is_some_and(|g| g.walkable);
+    if !grounded
+        && dash_cfg.max_air_dashes > 0
+        && dash_cfg.air_dashes_used >= dash_cfg.max_air_dashes
+    {
+        return false;
+    }
+
+    // Lock direction.
+    let direction = if wish_velocity.length_squared() > 0.001 {
+        wish_velocity.normalize()
+    } else {
+        let fwd = state.orientation * Vec3::NEG_Z;
+        horizontal(fwd).normalize_or_zero()
+    };
+    if direction == Vec3::ZERO {
+        return false;
+    }
+
+    input.dash_pressed_for = None;
+    dash_cfg.time_since_dash = 0.0;
+    if !grounded {
+        dash_cfg.air_dashes_used += 1;
+    }
+    state.dash = Some(DashState {
+        direction,
+        remaining: dash_cfg.duration.as_secs_f32(),
+        speed: dash_cfg.speed,
+    });
+    true
+}
+
+/// Advance an active dash, consuming remaining time. Ends the dash when duration expires.
+#[allow(clippy::too_many_arguments)]
+fn advance_dash(
+    entity: Entity,
+    controller: &CharacterController,
+    cache: &CharacterColliderCache,
+    move_and_slide: &MoveAndSlide,
+    dt: f32,
+    state: &mut CharacterControllerState,
+    linear_velocity: &mut LinearVelocity,
+    transform: &mut Transform,
+    scratch: &mut CharacterControllerScratch,
+    stats: &mut CharacterMotionStats,
+    dash: Option<&mut CharacterDash>,
+) {
+    let Some(mut dash_state) = state.dash else {
+        return;
+    };
+    let cancel_gravity = dash.as_ref().is_none_or(|d| d.cancel_gravity);
+
+    // Drive velocity along the locked direction.
+    linear_velocity.0 = dash_state.direction * dash_state.speed;
+    if cancel_gravity {
+        linear_velocity.y = 0.0;
+    }
+
+    move_character(
+        entity,
+        controller,
+        cache,
+        move_and_slide,
+        dt,
+        linear_velocity,
+        transform,
+        state,
+        scratch,
+        stats,
+    );
+
+    dash_state.remaining -= dt;
+    if dash_state.remaining <= 0.0 {
+        state.dash = None;
+    } else {
+        state.dash = Some(dash_state);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Core helpers
+// ---------------------------------------------------------------------------
 
 fn depenetrate_character(
     entity: Entity,
@@ -567,9 +789,14 @@ fn ground_probe(
     dt: f32,
     stats: &mut CharacterMotionStats,
 ) -> Option<GroundContact> {
-    if state.water_level > WaterLevel::Feet {
-        return None;
-    }
+    // NOTE: ground probing is skipped when environment depth is beyond Shallow
+    // because the character is swimming; this is now read from the EnvironmentModifiers
+    // component passed to `run_controllers`. Since `ground_probe` is a plain fn
+    // without access to `env`, callers gate on `env.depth` *before* calling when
+    // needed (e.g. water_move branch). The old `state.water_level` field no longer
+    // exists; however the ground probe itself was previously gated here. We keep the
+    // probe running unconditionally so that `SenseOnly` mode and landing detection
+    // still work even while submerged (the swim branch simply ignores the result).
     if linear_velocity_moving_up_rapidly(state, support_velocity, controller) {
         return None;
     }
@@ -940,6 +1167,19 @@ fn try_jump(
         return true;
     }
 
+    // Air jump check: if not grounded and no coyote time, try air jump.
+    if controller.max_air_jumps > state.air_jumps_used {
+        if ages_recently(
+            input.jump_pressed_for,
+            controller.jump_input_buffer.as_secs_f32(),
+        ) {
+            input.jump_pressed_for = None;
+            state.air_jumps_used += 1;
+            linear_velocity.y = jump_speed;
+            return true;
+        }
+    }
+
     let Some(wall_kick) = wall_kick else {
         return false;
     };
@@ -1178,22 +1418,23 @@ fn water_move(
     dt: f32,
     support_velocity: Vec3,
     wish_velocity: Vec3,
+    env: &EnvironmentModifiers,
     linear_velocity: &mut LinearVelocity,
     transform: &mut Transform,
     state: &mut CharacterControllerState,
     scratch: &mut CharacterControllerScratch,
     stats: &mut CharacterMotionStats,
 ) {
-    let slowed = wish_velocity * swimming.slowdown * state.water_speed_multiplier.max(0.0);
+    let slowed = wish_velocity * swimming.slowdown * env.speed_multiplier.max(0.0);
     linear_velocity.0 += quake_acceleration_delta(
         linear_velocity.0,
         slowed,
         slowed.length(),
-        swimming.acceleration_hz * state.water_acceleration_multiplier.max(0.0),
+        swimming.acceleration_hz * env.acceleration_multiplier.max(0.0),
         dt,
         None,
     );
-    linear_velocity.y -= swimming.gravity * state.water_gravity_multiplier.max(0.0) * dt;
+    linear_velocity.y -= swimming.gravity * env.gravity_multiplier.max(0.0) * dt;
     linear_velocity.0 += support_velocity;
     step_move(
         entity,

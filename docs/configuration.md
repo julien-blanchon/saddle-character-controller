@@ -35,6 +35,9 @@
 | `global_speed_scale` | `f32` | `1.0` | `0.1..3.0` | Global scalar applied to grounded move speed. Useful for accessibility or game-wide tuning. |
 | `max_speed` | `f32` | `100.0` | `10.0..500.0` | Safety clamp on total velocity magnitude. |
 | `unground_speed` | `f32` | `10.0` | `0.0..50.0` | Relative upward support speed above which the controller stops treating the support as stable ground. |
+| `jump_cut_gravity_multiplier` | `f32` | `3.0` | `1.0..6.0` | Extra gravity applied when jump button is released during ascent. Enables variable-height jumps. |
+| `max_air_jumps` | `u32` | `0` | `0..5` | Number of additional jumps allowed while airborne (double jump = 1, triple = 2). |
+| `controller_mode` | `ControllerMode` | `Enabled` | `Enabled`, `SenseOnly`, `Disabled` | Controls whether the controller runs full simulation, probe-only sensing, or is completely disabled. |
 | `slide_gravity_scale` | `f32` | `1.0` | `0.2..3.0` | Gravity multiplier while standing on a steep non-walkable surface. |
 | `support_velocity_policy` | `SupportVelocityPolicy` | `Horizontal` | `None`, `Horizontal`, `Full` | Default platform-inheritance mode when the contacted surface does not override it. |
 | `support_rotation_policy` | `SupportRotationPolicy` | `YawOnly` | `None`, `YawOnly` | Default rotating-platform inheritance mode. `YawOnly` keeps the controller aligned to turntables without inheriting full pitch/roll from arbitrary supports. |
@@ -83,6 +86,32 @@
 | `cooldown` | `Duration` | `300ms` | `0..1000ms` | Minimum time between consecutive wall kicks. |
 | `max_wall_angle` | `f32` radians | `40°` | `20°..80°` | Maximum wall normal elevation for a kickable wall. |
 
+## `CharacterDash`
+
+| Field | Type | Default | Practical Range | Effect |
+| --- | --- | --- | --- | --- |
+| `speed` | `f32` | `28.0` | `10.0..50.0` | Velocity magnitude during a dash. |
+| `duration` | `Duration` | `180ms` | `50..500ms` | How long the dash lasts. |
+| `cooldown` | `Duration` | `400ms` | `0..2000ms` | Minimum time between consecutive dashes. |
+| `cancel_gravity` | `bool` | `true` | `true` or `false` | Whether gravity is zeroed during the dash. |
+| `max_air_dashes` | `u32` | `1` | `0..5` | Number of dashes allowed before landing. Reset on ground contact. |
+
+## `CharacterGravity`
+
+| Field | Type | Default | Practical Range | Effect |
+| --- | --- | --- | --- | --- |
+| `magnitude` | `f32` | `29.0` | `0.0..60.0` | Gravity strength for this entity, overriding `CharacterController::gravity`. |
+| `direction` | `Vec3` | `-Y` | unit vector | Direction of gravity pull. Allows custom gravity directions per entity. |
+
+## `EnvironmentVolume`
+
+| Field | Type | Default | Practical Range | Effect |
+| --- | --- | --- | --- | --- |
+| `speed_multiplier` | `f32` | `1.0` | `0.0..2.0` | Multiplies requested move velocity inside the volume. |
+| `acceleration_multiplier` | `f32` | `1.0` | `0.0..2.0` | Multiplies acceleration rate while the volume is active. |
+| `gravity_multiplier` | `f32` | `1.0` | `0.0..2.0` | Multiplies gravity while the volume is active. |
+| `swim_volume` | `bool` | `false` | `true` or `false` | Whether this volume triggers swim mode (requires `CharacterSwimming` on the entity). |
+
 ## `CharacterPush`
 
 | Field | Type | Default | Practical Range | Effect |
@@ -124,5 +153,6 @@
 
 - `ExternalMotion::velocity_delta` is a generic gameplay hook. Systems outside the crate can write to it and let the controller consume the value on the next simulation step.
 - `CharacterControllerState`, `GroundContact`, `MantleState`, and `CharacterMotionStats` are runtime-read surfaces, not tuning surfaces.
-- `CharacterControllerState` publishes the resolved `water_*_multiplier` values and `support_angular_velocity` so BRP sessions and overlays can inspect what the environment actually resolved this frame.
+- `EnvironmentModifiers` publishes the resolved depth, active volume, and multiplier values so BRP sessions and overlays can inspect what the environment actually resolved this frame.
+- `CharacterControllerState` publishes `support_angular_velocity`, air jump tracking, and dash state.
 - `SupportRotationPolicy` only affects how rotating supports modify facing. Linear support inheritance still uses `SupportVelocityPolicy`.

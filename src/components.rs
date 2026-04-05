@@ -1,5 +1,5 @@
 use crate::{
-    state::CharacterControllerState,
+    state::{CharacterControllerState, ControllerMode, EnvironmentModifiers},
     surfaces::{SupportRotationPolicy, SupportVelocityPolicy},
 };
 use avian3d::{
@@ -20,6 +20,7 @@ const DEFAULT_CROUCH_HEIGHT: f32 = 1.3;
 #[require(
     crate::AccumulatedInput,
     CharacterControllerState,
+    EnvironmentModifiers,
     CharacterMotionStats,
     CharacterColliderCache,
     CharacterControllerScratch,
@@ -42,12 +43,18 @@ pub struct CharacterController {
     pub max_air_wish_speed: f32,
     pub gravity: f32,
     pub fall_gravity_multiplier: f32,
+    /// Extra gravity applied when the jump button is released during ascent.
+    /// Set to 1.0 for fixed-height jumps. Higher values (2.0–4.0) give snappy
+    /// variable-height jumps. Default: 3.0.
+    pub jump_cut_gravity_multiplier: f32,
     pub terminal_velocity: f32,
     pub friction_hz: f32,
     pub acceleration_hz: f32,
     pub air_acceleration_hz: f32,
     pub stop_speed: f32,
     pub jump_height: f32,
+    /// Maximum extra jumps available while airborne (0 = no air jumps, 1 = double jump, etc.).
+    pub max_air_jumps: u32,
     pub coyote_time: Duration,
     pub jump_input_buffer: Duration,
     pub ground_distance: f32,
@@ -68,6 +75,8 @@ pub struct CharacterController {
     pub support_velocity_policy: SupportVelocityPolicy,
     pub support_rotation_policy: SupportRotationPolicy,
     pub support_detach_grace: Duration,
+    /// Controller operational mode. See [`ControllerMode`].
+    pub controller_mode: ControllerMode,
 }
 
 impl Default for CharacterController {
@@ -82,12 +91,14 @@ impl Default for CharacterController {
             max_air_wish_speed: 0.76,
             gravity: 29.0,
             fall_gravity_multiplier: 1.0,
+            jump_cut_gravity_multiplier: 3.0,
             terminal_velocity: 50.0,
             friction_hz: 12.0,
             acceleration_hz: 8.0,
             air_acceleration_hz: 12.0,
             stop_speed: 2.54,
             jump_height: 1.8,
+            max_air_jumps: 0,
             coyote_time: Duration::from_millis(100),
             jump_input_buffer: Duration::from_millis(150),
             ground_distance: 0.05,
@@ -108,6 +119,70 @@ impl Default for CharacterController {
             support_velocity_policy: SupportVelocityPolicy::Horizontal,
             support_rotation_policy: SupportRotationPolicy::YawOnly,
             support_detach_grace: Duration::from_millis(120),
+            controller_mode: ControllerMode::default(),
+        }
+    }
+}
+
+/// Configuration presets for common character controller setups.
+///
+/// Presets return a [`CharacterController`] with tuned defaults. Consumers can use
+/// them as starting points and override individual fields.
+///
+/// ```rust
+/// # use saddle_character_controller::*;
+/// let controller = CharacterPreset::platformer();
+/// // Override a single field:
+/// let controller = CharacterController { speed: 14.0, ..CharacterPreset::platformer() };
+/// ```
+pub struct CharacterPreset;
+
+impl CharacterPreset {
+    /// Standard FPS / exploration controller with Quake-style movement.
+    pub fn default_fps() -> CharacterController {
+        CharacterController::default()
+    }
+
+    /// Responsive platformer: higher gravity, larger coyote time, double jump.
+    pub fn platformer() -> CharacterController {
+        CharacterController {
+            gravity: 38.0,
+            fall_gravity_multiplier: 1.6,
+            jump_cut_gravity_multiplier: 4.0,
+            jump_height: 2.4,
+            max_air_jumps: 1,
+            coyote_time: Duration::from_millis(130),
+            jump_input_buffer: Duration::from_millis(180),
+            speed: 10.0,
+            air_acceleration_hz: 18.0,
+            ..Default::default()
+        }
+    }
+
+    /// Slow, deliberate exploration controller (walking simulator style).
+    pub fn explorer() -> CharacterController {
+        CharacterController {
+            speed: 5.0,
+            sprint_speed_scale: 1.2,
+            gravity: 20.0,
+            jump_height: 1.0,
+            air_acceleration_hz: 4.0,
+            ..Default::default()
+        }
+    }
+
+    /// Fast arena / bunny-hop tuning with auto-bhop and air strafe.
+    pub fn arena() -> CharacterController {
+        CharacterController {
+            speed: 14.0,
+            sprint_speed_scale: 1.0,
+            air_speed: 3.0,
+            max_air_wish_speed: 1.2,
+            air_acceleration_hz: 30.0,
+            auto_bhop: true,
+            gravity: 24.0,
+            jump_height: 2.0,
+            ..Default::default()
         }
     }
 }
@@ -208,6 +283,61 @@ impl Default for CharacterWallKick {
             input_buffer: Duration::from_millis(150),
             cooldown: Duration::from_millis(300),
             max_wall_angle: 40.0_f32.to_radians(),
+        }
+    }
+}
+
+/// Optional dash ability. Attach to a controller entity to enable dashing.
+///
+/// When triggered via [`DashAction`](crate::DashAction), the controller enters a
+/// direction-locked, gravity-free burst of movement for the configured duration.
+#[derive(Component, Reflect, Debug, Clone)]
+#[reflect(Component, Debug)]
+pub struct CharacterDash {
+    /// Dash speed in units per second.
+    pub speed: f32,
+    /// Total dash duration.
+    pub duration: Duration,
+    /// Cooldown between dashes.
+    pub cooldown: Duration,
+    /// If true, gravity is cancelled during the dash.
+    pub cancel_gravity: bool,
+    /// Maximum air dashes before needing to land (0 = unlimited).
+    pub max_air_dashes: u32,
+    /// Time since last dash ended. Managed by the controller; do not set manually.
+    pub time_since_dash: f32,
+    /// Air dashes used since last grounding.
+    pub air_dashes_used: u32,
+}
+
+impl Default for CharacterDash {
+    fn default() -> Self {
+        Self {
+            speed: 28.0,
+            duration: Duration::from_millis(180),
+            cooldown: Duration::from_millis(400),
+            cancel_gravity: true,
+            max_air_dashes: 1,
+            time_since_dash: f32::MAX / 4.0,
+            air_dashes_used: 0,
+        }
+    }
+}
+
+/// Per-entity gravity override. When present, this takes priority over
+/// `CharacterController::gravity`.
+#[derive(Component, Reflect, Debug, Clone)]
+#[reflect(Component, Debug)]
+pub struct CharacterGravity {
+    pub magnitude: f32,
+    pub direction: Vec3,
+}
+
+impl Default for CharacterGravity {
+    fn default() -> Self {
+        Self {
+            magnitude: 29.0,
+            direction: Vec3::NEG_Y,
         }
     }
 }
