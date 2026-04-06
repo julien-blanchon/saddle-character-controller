@@ -2,7 +2,7 @@ use crate::{AccumulatedInput, CharacterController};
 use bevy::prelude::*;
 use bevy_enhanced_input::context::InputContextAppExt;
 use bevy_enhanced_input::prelude::{
-    Cancel as InputCancel, Complete, EnhancedInputPlugin, Fire, InputAction, Start,
+    Cancel as InputCancel, Complete, EnhancedInputPlugin, Fire, InputAction,
 };
 
 #[derive(Debug, InputAction)]
@@ -89,12 +89,16 @@ pub(crate) fn clear_move_axis_on_complete(
     }
 }
 
+// Jump uses Fire + manual edge detection instead of Start for reliability.
+// press_jump() is only called on the rising edge (when jump_held is false).
 pub(crate) fn cache_jump_press(
-    trigger: On<Start<JumpAction>>,
+    trigger: On<Fire<JumpAction>>,
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.press_jump();
+        if !input.jump_held {
+            input.press_jump();
+        }
     }
 }
 
@@ -116,21 +120,26 @@ pub(crate) fn clear_jump_held_on_complete(
     }
 }
 
+// Dash and traverse also use Fire + edge detection for reliability.
 pub(crate) fn cache_dash_press(
-    trigger: On<Start<DashAction>>,
+    trigger: On<Fire<DashAction>>,
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.press_dash();
+        if input.dash_pressed_for.is_none() {
+            input.press_dash();
+        }
     }
 }
 
 pub(crate) fn cache_traverse_press(
-    trigger: On<Start<TraverseAction>>,
+    trigger: On<Fire<TraverseAction>>,
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.press_traverse();
+        if input.traverse_pressed_for.is_none() {
+            input.press_traverse();
+        }
     }
 }
 
