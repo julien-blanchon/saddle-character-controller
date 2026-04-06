@@ -9,22 +9,20 @@
 use std::time::Duration;
 
 use bevy::prelude::*;
-use bevy_enhanced_input::prelude::*;
+use common::{
+    DemoFixedSystems, DemoPlayer, FirstPersonCamera, add_demo_controller_plugins,
+    animate_platforms, default_character_actions, follow_first_person_camera, spawn_block,
+    spawn_demo_instructions, spawn_flat_ground, spawn_lighting, spawn_platform, spawn_stairs,
+};
 use saddle_character_controller::{
-    AscendAction, CharacterController, CharacterControllerDebugDraw,
-    CharacterControllerPlugin, CharacterControllerSystems, CharacterFlying, CharacterLook,
-    CharacterMantle, CharacterPush, CharacterWallKick, CrouchAction, JumpAction, LookAction,
-    MoveAction, SprintAction, TraverseAction,
+    CharacterController, CharacterControllerDebugDraw, CharacterControllerSystems, CharacterFlying,
+    CharacterLook, CharacterMantle, CharacterPush, CharacterWallKick,
 };
 use saddle_character_controller_example_common as common;
-use common::{
-    DemoFixedSystems, DemoPlayer, FirstPersonCamera, animate_platforms, follow_first_person_camera,
-    spawn_block, spawn_flat_ground, spawn_lighting, spawn_platform, spawn_stairs,
-};
 
 fn main() -> AppExit {
     let mut app = common::base_app("character_controller traversal");
-    app.add_plugins(CharacterControllerPlugin::always_on(FixedUpdate));
+    add_demo_controller_plugins(&mut app);
 
     // Debug draw helps visualize mantle detection and wall-kick traces.
     app.insert_resource(CharacterControllerDebugDraw {
@@ -53,11 +51,18 @@ fn setup_scene(
 ) {
     spawn_lighting(&mut commands);
     spawn_flat_ground(&mut commands, &mut meshes, &mut materials, 120.0);
+    spawn_demo_instructions(
+        &mut commands,
+        "Traversal",
+        &["Mantle the green block with E, then wall-kick off the tall wall with a second jump."],
+    );
 
     // -- Mantle block: a waist-high obstacle the player can vault over ------
     // Press the traverse key (E) while moving into the block and looking at it.
     spawn_block(
-        &mut commands, &mut meshes, &mut materials,
+        &mut commands,
+        &mut meshes,
+        &mut materials,
         "Mantle Block",
         Vec3::new(0.0, 0.75, -2.0),
         Vec3::new(2.0, 1.5, 2.0),
@@ -67,7 +72,9 @@ fn setup_scene(
     // -- Tall wall: too high to mantle, but can wall-kick off ---------------
     // Jump toward it and press jump again while touching the wall to kick off.
     spawn_block(
-        &mut commands, &mut meshes, &mut materials,
+        &mut commands,
+        &mut meshes,
+        &mut materials,
         "Tall Wall",
         Vec3::new(8.0, 2.0, -6.0),
         Vec3::new(1.0, 4.0, 8.0),
@@ -76,14 +83,21 @@ fn setup_scene(
 
     // -- Staircase ----------------------------------------------------------
     spawn_stairs(
-        &mut commands, &mut meshes, &mut materials,
+        &mut commands,
+        &mut meshes,
+        &mut materials,
         Vec3::new(-10.0, 0.0, -8.0),
-        6, 1.0, 0.3, 2.0,
+        6,
+        1.0,
+        0.3,
+        2.0,
     );
 
     // -- Elevated ledge to reach via wall-kick or mantle combo --------------
     spawn_platform(
-        &mut commands, &mut meshes, &mut materials,
+        &mut commands,
+        &mut meshes,
+        &mut materials,
         "Traversal Ledge",
         Vec3::new(14.0, 2.6, 4.0),
         Vec3::new(6.0, 0.3, 3.0),
@@ -109,27 +123,21 @@ fn setup_scene(
         ..default()
     };
 
-    let player = commands.spawn((
-        Name::new("Player"),
-        DemoPlayer,
-        controller,
-        look,
-        CharacterFlying::default(),
-        CharacterPush::default(),
-        CharacterMantle::default(),   // enable ledge mantling
-        CharacterWallKick::default(), // enable wall-kick
-        Visibility::Inherited,
-        Transform::from_xyz(-12.0, 3.0, 12.0),
-        actions!(CharacterController[
-            (Action::<MoveAction>::new(), DeadZone::default(), Bindings::spawn((Cardinal::wasd_keys(), Axial::left_stick()))),
-            (Action::<LookAction>::new(), Bindings::spawn((Spawn((Binding::mouse_motion(), Scale::splat(0.0025))), Axial::right_stick().with((Scale::splat(0.06), DeadZone::default()))))),
-            (Action::<JumpAction>::new(), bindings![KeyCode::Space, GamepadButton::South]),
-            (Action::<SprintAction>::new(), bindings![KeyCode::ShiftLeft, GamepadButton::LeftTrigger2]),
-            (Action::<CrouchAction>::new(), bindings![KeyCode::ControlLeft, KeyCode::KeyC, GamepadButton::East]),
-            (Action::<AscendAction>::new(), bindings![KeyCode::KeyQ, GamepadButton::LeftTrigger]),
-            (Action::<TraverseAction>::new(), bindings![KeyCode::KeyE, GamepadButton::RightTrigger]),
-        ]),
-    )).id();
+    let player = commands
+        .spawn((
+            Name::new("Player"),
+            DemoPlayer,
+            controller,
+            look,
+            CharacterFlying::default(),
+            CharacterPush::default(),
+            CharacterMantle::default(),   // enable ledge mantling
+            CharacterWallKick::default(), // enable wall-kick
+            Visibility::Inherited,
+            Transform::from_xyz(-12.0, 3.0, 12.0),
+            default_character_actions(),
+        ))
+        .id();
 
     commands.spawn((
         Name::new("First Person Camera"),

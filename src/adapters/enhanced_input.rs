@@ -1,20 +1,9 @@
-use crate::{CharacterController, CharacterControllerState, CharacterLook};
+use crate::{AccumulatedInput, CharacterController, CharacterControllerState, CharacterLook};
 use bevy::prelude::*;
-use bevy_enhanced_input::prelude::{Cancel as InputCancel, Complete, Fire, InputAction, Start};
-
-#[derive(Component, Reflect, Debug, Clone, Default)]
-#[reflect(Component, Debug)]
-pub struct AccumulatedInput {
-    pub move_axis: Vec2,
-    pub look_axis: Vec2,
-    pub jump_pressed_for: Option<f32>,
-    pub jump_held: bool,
-    pub traverse_pressed_for: Option<f32>,
-    pub dash_pressed_for: Option<f32>,
-    pub sprint_active: bool,
-    pub crouch_active: bool,
-    pub ascend_active: bool,
-}
+use bevy_enhanced_input::context::InputContextAppExt;
+use bevy_enhanced_input::prelude::{
+    Cancel as InputCancel, Complete, EnhancedInputPlugin, Fire, InputAction, Start,
+};
 
 #[derive(Debug, InputAction)]
 #[action_output(Vec2)]
@@ -48,12 +37,44 @@ pub struct TraverseAction;
 #[action_output(bool)]
 pub struct DashAction;
 
+pub struct CharacterControllerEnhancedInputPlugin;
+
+impl Plugin for CharacterControllerEnhancedInputPlugin {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<EnhancedInputPlugin>() {
+            app.add_plugins(EnhancedInputPlugin);
+        }
+
+        app.add_input_context::<CharacterController>()
+            .add_observer(cache_move_axis)
+            .add_observer(clear_move_axis_on_cancel)
+            .add_observer(clear_move_axis_on_complete)
+            .add_observer(cache_jump_press)
+            .add_observer(clear_jump_held_on_cancel)
+            .add_observer(clear_jump_held_on_complete)
+            .add_observer(cache_traverse_press)
+            .add_observer(cache_dash_press)
+            .add_observer(cache_sprint_active)
+            .add_observer(clear_sprint_active_on_cancel)
+            .add_observer(clear_sprint_active_on_complete)
+            .add_observer(cache_crouch_active)
+            .add_observer(clear_crouch_active_on_cancel)
+            .add_observer(clear_crouch_active_on_complete)
+            .add_observer(cache_ascend_active)
+            .add_observer(clear_ascend_active_on_cancel)
+            .add_observer(clear_ascend_active_on_complete)
+            .add_observer(apply_look_axis)
+            .add_observer(clear_look_axis_on_cancel)
+            .add_observer(clear_look_axis_on_complete);
+    }
+}
+
 pub(crate) fn cache_move_axis(
     trigger: On<Fire<MoveAction>>,
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.move_axis = trigger.value;
+        input.set_move_axis(trigger.value);
     }
 }
 
@@ -62,7 +83,7 @@ pub(crate) fn clear_move_axis_on_cancel(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.move_axis = Vec2::ZERO;
+        input.set_move_axis(Vec2::ZERO);
     }
 }
 
@@ -71,7 +92,7 @@ pub(crate) fn clear_move_axis_on_complete(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.move_axis = Vec2::ZERO;
+        input.set_move_axis(Vec2::ZERO);
     }
 }
 
@@ -80,8 +101,7 @@ pub(crate) fn cache_jump_press(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.jump_pressed_for = Some(0.0);
-        input.jump_held = true;
+        input.press_jump();
     }
 }
 
@@ -90,7 +110,7 @@ pub(crate) fn clear_jump_held_on_cancel(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.jump_held = false;
+        input.release_jump();
     }
 }
 
@@ -99,7 +119,7 @@ pub(crate) fn clear_jump_held_on_complete(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.jump_held = false;
+        input.release_jump();
     }
 }
 
@@ -108,7 +128,7 @@ pub(crate) fn cache_dash_press(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.dash_pressed_for = Some(0.0);
+        input.press_dash();
     }
 }
 
@@ -117,7 +137,7 @@ pub(crate) fn cache_traverse_press(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.traverse_pressed_for = Some(0.0);
+        input.press_traverse();
     }
 }
 
@@ -126,7 +146,7 @@ pub(crate) fn cache_sprint_active(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.sprint_active = trigger.value;
+        input.set_sprint_active(trigger.value);
     }
 }
 
@@ -135,7 +155,7 @@ pub(crate) fn clear_sprint_active_on_cancel(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.sprint_active = false;
+        input.set_sprint_active(false);
     }
 }
 
@@ -144,7 +164,7 @@ pub(crate) fn clear_sprint_active_on_complete(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.sprint_active = false;
+        input.set_sprint_active(false);
     }
 }
 
@@ -153,7 +173,7 @@ pub(crate) fn cache_crouch_active(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.crouch_active = trigger.value;
+        input.set_crouch_active(trigger.value);
     }
 }
 
@@ -162,7 +182,7 @@ pub(crate) fn clear_crouch_active_on_cancel(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.crouch_active = false;
+        input.set_crouch_active(false);
     }
 }
 
@@ -171,7 +191,7 @@ pub(crate) fn clear_crouch_active_on_complete(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.crouch_active = false;
+        input.set_crouch_active(false);
     }
 }
 
@@ -180,7 +200,7 @@ pub(crate) fn cache_ascend_active(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.ascend_active = trigger.value;
+        input.set_ascend_active(trigger.value);
     }
 }
 
@@ -189,7 +209,7 @@ pub(crate) fn clear_ascend_active_on_cancel(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.ascend_active = false;
+        input.set_ascend_active(false);
     }
 }
 
@@ -198,7 +218,7 @@ pub(crate) fn clear_ascend_active_on_complete(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.ascend_active = false;
+        input.set_ascend_active(false);
     }
 }
 
@@ -216,7 +236,7 @@ pub(crate) fn apply_look_axis(
     let Ok((mut input, look, mut state)) = query.get_mut(trigger.context) else {
         return;
     };
-    input.look_axis = trigger.value;
+    input.set_look_axis(trigger.value);
     let Some(mut look) = look else {
         return;
     };
@@ -231,7 +251,7 @@ pub(crate) fn clear_look_axis_on_cancel(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.look_axis = Vec2::ZERO;
+        input.set_look_axis(Vec2::ZERO);
     }
 }
 
@@ -240,24 +260,6 @@ pub(crate) fn clear_look_axis_on_complete(
     mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
 ) {
     if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.look_axis = Vec2::ZERO;
-    }
-}
-
-pub(crate) fn tick_input_buffers(mut query: Query<&mut AccumulatedInput>, time: Res<Time>) {
-    let dt = time.delta_secs();
-    if dt <= 0.0 {
-        return;
-    }
-    for mut input in &mut query {
-        if let Some(age) = input.jump_pressed_for.as_mut() {
-            *age += dt;
-        }
-        if let Some(age) = input.traverse_pressed_for.as_mut() {
-            *age += dt;
-        }
-        if let Some(age) = input.dash_pressed_for.as_mut() {
-            *age += dt;
-        }
+        input.set_look_axis(Vec2::ZERO);
     }
 }

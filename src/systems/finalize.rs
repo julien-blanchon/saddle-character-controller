@@ -1,6 +1,6 @@
 use crate::{
     CharacterControllerState, CharacterJumped, CharacterLanded, CharacterMotionStats,
-    MovementModeChanged, SupportBodyChanged, components::PendingLanding, input::AccumulatedInput,
+    MovementModeChanged, SupportBodyChanged, components::PendingLanding, intent::AccumulatedInput,
 };
 use avian3d::prelude::*;
 use bevy::prelude::*;

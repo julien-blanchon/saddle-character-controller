@@ -10,22 +10,19 @@
 use std::time::Duration;
 
 use bevy::prelude::*;
-use bevy_enhanced_input::prelude::*;
-use saddle_character_controller::{
-    AscendAction, CharacterController, CharacterControllerPlugin, CharacterControllerSystems,
-    CharacterLook, CrouchAction, JumpAction, LookAction, MoveAction, SprintAction, TraverseAction,
-};
-use saddle_character_controller_example_common as common;
 use common::{
-    DemoFixedSystems, DemoPlayer, animate_platforms, spawn_block, spawn_controller_visual,
+    DemoFixedSystems, DemoPlayer, add_demo_controller_plugins, animate_platforms,
+    default_character_actions, spawn_block, spawn_controller_visual, spawn_demo_instructions,
     spawn_flat_ground, spawn_lighting,
 };
+use saddle_character_controller::{CharacterController, CharacterControllerSystems, CharacterLook};
+use saddle_character_controller_example_common as common;
 
 const BOT_COUNT: usize = 49; // plus 1 player = 50 total
 
 fn main() -> AppExit {
     let mut app = common::base_app("character_controller stress_many_controllers");
-    app.add_plugins(CharacterControllerPlugin::always_on(FixedUpdate));
+    add_demo_controller_plugins(&mut app);
 
     app.configure_sets(
         FixedUpdate,
@@ -47,12 +44,21 @@ fn setup_scene(
 ) {
     spawn_lighting(&mut commands);
     spawn_flat_ground(&mut commands, &mut meshes, &mut materials, 180.0);
+    spawn_demo_instructions(
+        &mut commands,
+        "Stress Test",
+        &[
+            "Only the orange player accepts input. The remaining controllers are passive runtime load for perf inspection.",
+        ],
+    );
 
     // A row of pillars for visual reference / collision variety.
     for i in 0..8 {
         let x = -30.0 + i as f32 * 8.0;
         spawn_block(
-            &mut commands, &mut meshes, &mut materials,
+            &mut commands,
+            &mut meshes,
+            &mut materials,
             &format!("Stress Pillar {i}"),
             Vec3::new(x, 1.5, -14.0),
             Vec3::new(2.0, 3.0, 2.0),
@@ -72,29 +78,26 @@ fn setup_scene(
         ..default()
     };
 
-    let player = commands.spawn((
-        Name::new("Player"),
-        DemoPlayer,
-        controller,
-        look,
-        // No CharacterPush — disabled in stress test to reduce pair-wise interactions.
-        Visibility::Inherited,
-        Transform::from_xyz(0.0, 3.0, 16.0),
-        actions!(CharacterController[
-            (Action::<MoveAction>::new(), DeadZone::default(), Bindings::spawn((Cardinal::wasd_keys(), Axial::left_stick()))),
-            (Action::<LookAction>::new(), Bindings::spawn((Spawn((Binding::mouse_motion(), Scale::splat(0.0025))), Axial::right_stick().with((Scale::splat(0.06), DeadZone::default()))))),
-            (Action::<JumpAction>::new(), bindings![KeyCode::Space, GamepadButton::South]),
-            (Action::<SprintAction>::new(), bindings![KeyCode::ShiftLeft, GamepadButton::LeftTrigger2]),
-            (Action::<CrouchAction>::new(), bindings![KeyCode::ControlLeft, KeyCode::KeyC, GamepadButton::East]),
-            (Action::<AscendAction>::new(), bindings![KeyCode::KeyQ, GamepadButton::LeftTrigger]),
-            (Action::<TraverseAction>::new(), bindings![KeyCode::KeyE, GamepadButton::RightTrigger]),
-        ]),
-    )).id();
+    let player = commands
+        .spawn((
+            Name::new("Player"),
+            DemoPlayer,
+            controller,
+            look,
+            // No CharacterPush — disabled in stress test to reduce pair-wise interactions.
+            Visibility::Inherited,
+            Transform::from_xyz(0.0, 3.0, 16.0),
+            default_character_actions(),
+        ))
+        .id();
 
     // Visible body for the player (overview cam needs to see it).
     spawn_controller_visual(
-        &mut commands, &mut meshes, &mut materials,
-        player, Color::srgb(0.92, 0.44, 0.22),
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        player,
+        Color::srgb(0.92, 0.44, 0.22),
     );
 
     // -- Bot controllers (no input, just physics) ---------------------------
@@ -109,22 +112,20 @@ fn setup_scene(
             }
             let x = column as f32 * spacing - 20.0;
             let z = row as f32 * spacing - 12.0;
-            let bot = commands.spawn((
-                Name::new(format!("Bot {spawned:02}")),
-                CharacterController {
-                    speed: 8.0,
-                    jump_height: 1.4,
-                    max_speed: 40.0,
-                    ..default()
-                },
-                Visibility::Inherited,
-                Transform::from_xyz(x, 3.0, z),
-            )).id();
-            let tint = Color::srgb(
-                0.25 + 0.02 * column as f32,
-                0.35 + 0.01 * row as f32,
-                0.75,
-            );
+            let bot = commands
+                .spawn((
+                    Name::new(format!("Bot {spawned:02}")),
+                    CharacterController {
+                        speed: 8.0,
+                        jump_height: 1.4,
+                        max_speed: 40.0,
+                        ..default()
+                    },
+                    Visibility::Inherited,
+                    Transform::from_xyz(x, 3.0, z),
+                ))
+                .id();
+            let tint = Color::srgb(0.25 + 0.02 * column as f32, 0.35 + 0.01 * row as f32, 0.75);
             spawn_controller_visual(&mut commands, &mut meshes, &mut materials, bot, tint);
             spawned += 1;
         }

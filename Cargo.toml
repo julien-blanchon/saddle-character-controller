@@ -5,12 +5,16 @@ edition = "2024"
 publish = false
 repository = "https://github.com/julien-blanchon/saddle-character-controller"
 license = "MIT-0"
-description = "Reusable 3D kinematic character controller for Bevy using Avian3D and bevy_enhanced_input"
+description = "Reusable 3D kinematic character controller for Bevy using Avian3D with optional adapter and convenience layers"
+
+[features]
+default = ["enhanced-input"]
+enhanced-input = ["dep:bevy_enhanced_input"]
 
 [dependencies]
 bevy = { version = "0.18", features = ["serialize"] }
 avian3d = "0.6"
-bevy_enhanced_input = "0.24"
+bevy_enhanced_input = { version = "0.24", optional = true }
 
 [workspace]
 

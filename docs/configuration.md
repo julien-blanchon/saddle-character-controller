@@ -1,17 +1,19 @@
 # Configuration
 
-## `CharacterController`
+This document separates core runtime configuration from optional convenience modules.
+
+## Core `CharacterController`
 
 | Field | Type | Default | Practical Range | Effect |
 | --- | --- | --- | --- | --- |
 | `filter` | `SpatialQueryFilter` | `default()` | project-specific | Base query filter for casts and depenetration. Use it to exclude layers or categories globally. |
-| `standing_view_height` | `f32` | `1.7` | `0.5..3.0` | Eye / camera height used by examples and by water head-depth checks while standing. |
+| `standing_view_height` | `f32` | `1.7` | `0.5..3.0` | Eye / camera height used by examples and by the optional environment helper when classifying depth. |
 | `crouch_view_height` | `f32` | `1.2` | `0.3..standing_view_height` | Eye / camera height while crouched. |
 | `speed` | `f32` | `12.0` | `2.0..30.0` | Base grounded move speed before sprint, crouch, global scale, and surface multipliers. |
 | `sprint_speed_scale` | `f32` | `1.5` | `1.0..2.5` | Multiplier applied when sprint input is active. |
 | `air_speed` | `f32` | `1.5` | `0.5..5.0` | Extra scale on the air-speed cap used by Quake-style air acceleration. |
 | `max_air_wish_speed` | `f32` | `0.76` | `0.2..3.0` | Wish-speed cap used during air acceleration. Lower values reduce air gain and strafe-jump headroom. |
-| `gravity` | `f32` | `29.0` | `9.8..60.0` | Base gravity magnitude outside water. Also feeds jump-speed derivation. |
+| `gravity` | `f32` | `29.0` | `9.8..60.0` | Base gravity magnitude outside helper-provided swim behavior. |
 | `fall_gravity_multiplier` | `f32` | `1.0` | `1.0..3.0` | Extra gravity while descending. Useful for faster falls without changing jump takeoff. |
 | `terminal_velocity` | `f32` | `50.0` | `10.0..200.0` | Clamp for downward speed. |
 | `friction_hz` | `f32` | `12.0` | `0.0..20.0` | Ground friction applied before acceleration for Quake / Source feel. |
@@ -40,31 +42,24 @@
 | `controller_mode` | `ControllerMode` | `Enabled` | `Enabled`, `SenseOnly`, `Disabled` | Controls whether the controller runs full simulation, probe-only sensing, or is completely disabled. |
 | `slide_gravity_scale` | `f32` | `1.0` | `0.2..3.0` | Gravity multiplier while standing on a steep non-walkable surface. |
 | `support_velocity_policy` | `SupportVelocityPolicy` | `Horizontal` | `None`, `Horizontal`, `Full` | Default platform-inheritance mode when the contacted surface does not override it. |
-| `support_rotation_policy` | `SupportRotationPolicy` | `YawOnly` | `None`, `YawOnly` | Default rotating-platform inheritance mode. `YawOnly` keeps the controller aligned to turntables without inheriting full pitch/roll from arbitrary supports. |
+| `support_rotation_policy` | `SupportRotationPolicy` | `YawOnly` | `None`, `YawOnly` | Default rotating-platform inheritance mode. |
 | `support_detach_grace` | `Duration` | `120ms` | `0..250ms` | Time window during which support velocity is preserved after ground loss. |
 
-## `CharacterFlying`
+## Core Optional Components
+
+### `CharacterFlying`
 
 | Field | Type | Default | Practical Range | Effect |
 | --- | --- | --- | --- | --- |
-| `enabled` | `bool` | `false` | `false` or `true` | Enables flying mode. Flying takes priority over grounded and swimming classification. |
+| `enabled` | `bool` | `false` | `false` or `true` | Enables flying mode. Flying takes priority over grounded and swim-mode classification. |
 | `speed` | `f32` | `14.0` | `2.0..40.0` | Base flight speed before sprint scaling. |
 | `sprint_speed_scale` | `f32` | `1.4` | `1.0..3.0` | Multiplier applied while sprint input is active during flight. |
 | `acceleration_hz` | `f32` | `8.0` | `1.0..20.0` | Flight acceleration rate toward the requested movement direction. |
 | `drag_hz` | `f32` | `6.0` | `0.0..20.0` | Flight damping applied when input relaxes or direction changes. |
 | `vertical_speed_scale` | `f32` | `1.0` | `0.0..3.0` | Scales ascend and descend input while flying. |
-| `collision_mode` | `FlightCollisionMode` | `Slide` | `Slide`, `NoClip` | `Slide` uses the normal move-and-slide path; `NoClip` moves directly through geometry for spectator-style traversal. |
+| `collision_mode` | `FlightCollisionMode` | `Slide` | `Slide`, `NoClip` | `Slide` uses the normal move-and-slide path; `NoClip` moves directly through geometry. |
 
-## `CharacterSwimming`
-
-| Field | Type | Default | Practical Range | Effect |
-| --- | --- | --- | --- | --- |
-| `acceleration_hz` | `f32` | `6.0` | `1.0..15.0` | Swim acceleration rate. |
-| `gravity` | `f32` | `2.4` | `0.0..10.0` | Downward pull while swimming. |
-| `slowdown` | `f32` | `0.6` | `0.1..1.0` | Scalar applied to the requested move velocity before acceleration. |
-| `ascent_speed_scale` | `f32` | `1.0` | `0.0..2.0` | Multiplier applied to upward swim input. |
-
-## `CharacterMantle`
+### `CharacterMantle`
 
 | Field | Type | Default | Practical Range | Effect |
 | --- | --- | --- | --- | --- |
@@ -75,7 +70,7 @@
 | `pull_up_height` | `f32` | `0.3` | `0.0..1.0` | Extra upward offset applied after finding the top surface. |
 | `input_buffer` | `Duration` | `60ms` | `0..200ms` | Buffered traverse input window used for mantle attempts. |
 
-## `CharacterWallKick`
+### `CharacterWallKick`
 
 | Field | Type | Default | Practical Range | Effect |
 | --- | --- | --- | --- | --- |
@@ -86,7 +81,7 @@
 | `cooldown` | `Duration` | `300ms` | `0..1000ms` | Minimum time between consecutive wall kicks. |
 | `max_wall_angle` | `f32` radians | `40°` | `20°..80°` | Maximum wall normal elevation for a kickable wall. |
 
-## `CharacterDash`
+### `CharacterDash`
 
 | Field | Type | Default | Practical Range | Effect |
 | --- | --- | --- | --- | --- |
@@ -96,29 +91,20 @@
 | `cancel_gravity` | `bool` | `true` | `true` or `false` | Whether gravity is zeroed during the dash. |
 | `max_air_dashes` | `u32` | `1` | `0..5` | Number of dashes allowed before landing. Reset on ground contact. |
 
-## `CharacterGravity`
+### `CharacterGravity`
 
 | Field | Type | Default | Practical Range | Effect |
 | --- | --- | --- | --- | --- |
 | `magnitude` | `f32` | `29.0` | `0.0..60.0` | Gravity strength for this entity, overriding `CharacterController::gravity`. |
 | `direction` | `Vec3` | `-Y` | unit vector | Direction of gravity pull. Allows custom gravity directions per entity. |
 
-## `EnvironmentVolume`
-
-| Field | Type | Default | Practical Range | Effect |
-| --- | --- | --- | --- | --- |
-| `speed_multiplier` | `f32` | `1.0` | `0.0..2.0` | Multiplies requested move velocity inside the volume. |
-| `acceleration_multiplier` | `f32` | `1.0` | `0.0..2.0` | Multiplies acceleration rate while the volume is active. |
-| `gravity_multiplier` | `f32` | `1.0` | `0.0..2.0` | Multiplies gravity while the volume is active. |
-| `swim_volume` | `bool` | `false` | `true` or `false` | Whether this volume triggers swim mode (requires `CharacterSwimming` on the entity). |
-
-## `CharacterPush`
+### `CharacterPush`
 
 | Field | Type | Default | Practical Range | Effect |
 | --- | --- | --- | --- | --- |
 | `impulse_scale` | `f32` | `5.0` | `0.0..20.0` | Linear impulse applied into dynamic rigidbodies when the controller hits them. |
 
-## `CharacterLook`
+### `CharacterLook`
 
 | Field | Type | Default | Practical Range | Effect |
 | --- | --- | --- | --- | --- |
@@ -128,7 +114,7 @@
 | `min_pitch` | `f32` radians | `-89°` | `-89°..0°` | Lower pitch clamp. |
 | `max_pitch` | `f32` radians | `89°` | `0°..89°` | Upper pitch clamp. |
 
-## `MovementSurface`
+### `MovementSurface`
 
 | Field | Type | Default | Practical Range | Effect |
 | --- | --- | --- | --- | --- |
@@ -138,10 +124,31 @@
 | `jump_multiplier` | `f32` | `1.0` | `0.0..2.0` | Scales derived jump speed from this surface. |
 | `conveyor_velocity` | `Vec3` | `Vec3::ZERO` | project-specific | Extra velocity applied from the surface itself. |
 | `inherit_velocity_policy` | `Option<SupportVelocityPolicy>` | `None` | `None`, `Some(...)` | Per-surface override for support velocity inheritance. |
-| `inherit_rotation_policy` | `Option<SupportRotationPolicy>` | `None` | `None`, `Some(...)` | Per-surface override for rotating-support inheritance. Useful when only some platforms should rotate the rider. |
+| `inherit_rotation_policy` | `Option<SupportRotationPolicy>` | `None` | `None`, `Some(...)` | Per-surface override for rotating-support inheritance. |
 | `slide_only` | `bool` | `false` | `false` or `true` | Forces the surface to classify as non-walkable even if its normal passes the slope check. |
 
-## `WaterVolume`
+## Convenience Module: `convenience::environment`
+
+These types are not installed by the core plugin. Add `CharacterControllerEnvironmentPlugin` or write your own detector systems.
+
+### `CharacterSwimming`
+
+| Field | Type | Default | Practical Range | Effect |
+| --- | --- | --- | --- | --- |
+| `acceleration_hz` | `f32` | `6.0` | `1.0..15.0` | Swim acceleration rate. |
+| `gravity` | `f32` | `2.4` | `0.0..10.0` | Downward pull while swimming. |
+| `slowdown` | `f32` | `0.6` | `0.1..1.0` | Scalar applied to requested move velocity before acceleration. |
+| `ascent_speed_scale` | `f32` | `1.0` | `0.0..2.0` | Multiplier applied to upward swim input. |
+
+### `EnvironmentVolume`
+
+| Field | Type | Default | Practical Range | Effect |
+| --- | --- | --- | --- | --- |
+| `speed_multiplier` | `f32` | `1.0` | `0.0..2.0` | Multiplies requested move velocity inside the volume. |
+| `acceleration_multiplier` | `f32` | `1.0` | `0.0..2.0` | Multiplies acceleration rate while the volume is active. |
+| `gravity_multiplier` | `f32` | `1.0` | `0.0..2.0` | Multiplies gravity while the volume is active. |
+
+### `SwimVolume`
 
 | Field | Type | Default | Practical Range | Effect |
 | --- | --- | --- | --- | --- |
@@ -149,10 +156,13 @@
 | `acceleration_multiplier` | `f32` | `1.0` | `0.0..2.0` | Multiplies `CharacterSwimming::acceleration_hz` while the volume is active. |
 | `gravity_multiplier` | `f32` | `1.0` | `0.0..2.0` | Multiplies `CharacterSwimming::gravity` while the volume is active. |
 
-## Notes
+## Convenience Module: `convenience::presets`
 
-- `ExternalMotion::velocity_delta` is a generic gameplay hook. Systems outside the crate can write to it and let the controller consume the value on the next simulation step.
-- `CharacterControllerState`, `GroundContact`, `MantleState`, and `CharacterMotionStats` are runtime-read surfaces, not tuning surfaces.
-- `EnvironmentModifiers` publishes the resolved depth, active volume, and multiplier values so BRP sessions and overlays can inspect what the environment actually resolved this frame.
-- `CharacterControllerState` publishes `support_angular_velocity`, air jump tracking, and dash state.
-- `SupportRotationPolicy` only affects how rotating supports modify facing. Linear support inheritance still uses `SupportVelocityPolicy`.
+`CharacterControllerPreset` is an opinionated tuning catalog for demos and quick prototypes:
+
+- `default_fps()`
+- `platformer()`
+- `explorer()`
+- `arena()`
+
+Treat those as starting points rather than part of the simulation contract.

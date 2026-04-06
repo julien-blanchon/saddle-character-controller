@@ -10,21 +10,20 @@
 use std::time::Duration;
 
 use bevy::prelude::*;
-use bevy_enhanced_input::prelude::*;
+use common::{
+    DemoFixedSystems, DemoPlayer, FirstPersonCamera, MovingPlatform, add_demo_controller_plugins,
+    animate_platforms, default_character_actions, follow_first_person_camera,
+    spawn_demo_instructions, spawn_flat_ground, spawn_lighting, spawn_platform,
+};
 use saddle_character_controller::{
-    AscendAction, CharacterController, CharacterControllerPlugin, CharacterControllerSystems,
-    CharacterFlying, CharacterLook, CharacterPush, CrouchAction, JumpAction, LookAction,
-    MoveAction, MovementSurface, SprintAction, SupportVelocityPolicy, TraverseAction,
+    CharacterController, CharacterControllerSystems, CharacterFlying, CharacterLook, CharacterPush,
+    MovementSurface, SupportVelocityPolicy,
 };
 use saddle_character_controller_example_common as common;
-use common::{
-    DemoFixedSystems, DemoPlayer, FirstPersonCamera, MovingPlatform, animate_platforms,
-    follow_first_person_camera, spawn_flat_ground, spawn_lighting, spawn_platform,
-};
 
 fn main() -> AppExit {
     let mut app = common::base_app("character_controller moving_platforms");
-    app.add_plugins(CharacterControllerPlugin::always_on(FixedUpdate));
+    add_demo_controller_plugins(&mut app);
 
     app.configure_sets(
         FixedUpdate,
@@ -49,10 +48,19 @@ fn setup_scene(
 ) {
     spawn_lighting(&mut commands);
     spawn_flat_ground(&mut commands, &mut meshes, &mut materials, 120.0);
+    spawn_demo_instructions(
+        &mut commands,
+        "Moving Platforms",
+        &[
+            "Ride the moving platforms and conveyor, then inspect support inheritance values in the pane.",
+        ],
+    );
 
     // -- Platform A: slides left-right along the X axis ---------------------
     spawn_platform(
-        &mut commands, &mut meshes, &mut materials,
+        &mut commands,
+        &mut meshes,
+        &mut materials,
         "Platform A",
         Vec3::new(-8.0, 1.0, 0.0),
         Vec3::new(3.5, 0.35, 3.5),
@@ -73,7 +81,9 @@ fn setup_scene(
     // regardless of the controller's own setting. This means the character inherits both
     // horizontal and vertical platform velocity.
     spawn_platform(
-        &mut commands, &mut meshes, &mut materials,
+        &mut commands,
+        &mut meshes,
+        &mut materials,
         "Platform B",
         Vec3::new(4.0, 2.2, -3.5),
         Vec3::new(3.0, 0.35, 3.0),
@@ -95,7 +105,9 @@ fn setup_scene(
     // -- Conveyor belt: static platform with surface conveyor velocity ------
     // The character slides sideways while standing on this surface even without input.
     spawn_platform(
-        &mut commands, &mut meshes, &mut materials,
+        &mut commands,
+        &mut meshes,
+        &mut materials,
         "Conveyor Strip",
         Vec3::new(16.0, 0.4, 0.0),
         Vec3::new(8.0, 0.2, 3.0),
@@ -125,25 +137,19 @@ fn setup_scene(
         ..default()
     };
 
-    let player = commands.spawn((
-        Name::new("Player"),
-        DemoPlayer,
-        controller,
-        look,
-        CharacterFlying::default(),
-        CharacterPush::default(),
-        Visibility::Inherited,
-        Transform::from_xyz(-16.0, 3.0, 0.0),
-        actions!(CharacterController[
-            (Action::<MoveAction>::new(), DeadZone::default(), Bindings::spawn((Cardinal::wasd_keys(), Axial::left_stick()))),
-            (Action::<LookAction>::new(), Bindings::spawn((Spawn((Binding::mouse_motion(), Scale::splat(0.0025))), Axial::right_stick().with((Scale::splat(0.06), DeadZone::default()))))),
-            (Action::<JumpAction>::new(), bindings![KeyCode::Space, GamepadButton::South]),
-            (Action::<SprintAction>::new(), bindings![KeyCode::ShiftLeft, GamepadButton::LeftTrigger2]),
-            (Action::<CrouchAction>::new(), bindings![KeyCode::ControlLeft, KeyCode::KeyC, GamepadButton::East]),
-            (Action::<AscendAction>::new(), bindings![KeyCode::KeyQ, GamepadButton::LeftTrigger]),
-            (Action::<TraverseAction>::new(), bindings![KeyCode::KeyE, GamepadButton::RightTrigger]),
-        ]),
-    )).id();
+    let player = commands
+        .spawn((
+            Name::new("Player"),
+            DemoPlayer,
+            controller,
+            look,
+            CharacterFlying::default(),
+            CharacterPush::default(),
+            Visibility::Inherited,
+            Transform::from_xyz(-16.0, 3.0, 0.0),
+            default_character_actions(),
+        ))
+        .id();
 
     commands.spawn((
         Name::new("First Person Camera"),

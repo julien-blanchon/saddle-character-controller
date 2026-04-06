@@ -106,16 +106,16 @@ Inheritance is then filtered by `SupportVelocityPolicy`:
 
 If the controller leaves the support, the inherited velocity can persist for `support_detach_grace`.
 
-## Water Volumes
+## Swim Volumes
 
-Swimming activates when the controller has `CharacterSwimming` and the resolved `WaterLevel` rises above `Feet`.
+Swimming activates when the controller has `convenience::environment::CharacterSwimming` and the resolved `EnvironmentDepth` rises above `Shallow`.
 
 The final swim motion uses two layers:
 
 - the actor-level `CharacterSwimming` values for baseline acceleration, slowdown, ascent, and gravity
-- the active `WaterVolume` multipliers for speed, acceleration, and gravity
+- the active `SwimVolume` multipliers for speed, acceleration, and gravity
 
-Those resolved multipliers are stored on `CharacterControllerState` so debugging tools can see the exact environment contribution that was active on the last tick.
+Those resolved multipliers are stored on `EnvironmentModifiers`, so debugging tools can see the exact environment contribution that was active on the last tick.
 
 ## Slopes, Sliding, And Surf-Like Surfaces
 

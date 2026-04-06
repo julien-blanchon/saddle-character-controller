@@ -11,9 +11,15 @@ use bevy::{
     prelude::*,
     window::{CursorGrabMode, CursorOptions, WindowResolution},
 };
+use bevy_enhanced_input::prelude::*;
 use saddle_character_controller::{
-    CharacterController, CharacterControllerState, CharacterFlying, CharacterLook,
-    CharacterMotionStats, FlightCollisionMode, SupportRotationPolicy,
+    CharacterController, CharacterControllerPlugin, CharacterControllerState, CharacterFlying,
+    CharacterLook, CharacterMotionStats, FlightCollisionMode, SupportRotationPolicy,
+    adapters::enhanced_input::{
+        AscendAction, CharacterControllerEnhancedInputPlugin, CrouchAction, JumpAction, LookAction,
+        MoveAction, SprintAction, TraverseAction,
+    },
+    convenience::environment::{CharacterControllerEnvironmentPlugin, SwimVolume},
 };
 use saddle_pane::prelude::*;
 
@@ -24,6 +30,9 @@ use saddle_pane::prelude::*;
 /// Marks the player-controlled character entity. Used by the pane sync system.
 #[derive(Component)]
 pub struct DemoPlayer;
+
+#[derive(Component)]
+pub struct DemoInstructions;
 
 // ---------------------------------------------------------------------------
 // Camera components & systems
@@ -106,6 +115,80 @@ pub fn add_cursor_systems(app: &mut App) {
             release_cursor.run_if(input_just_pressed(KeyCode::Escape)),
         ),
     );
+}
+
+pub fn add_demo_controller_plugins(app: &mut App) {
+    app.add_plugins((
+        CharacterControllerPlugin::always_on(FixedUpdate),
+        CharacterControllerEnhancedInputPlugin,
+        CharacterControllerEnvironmentPlugin::new(FixedUpdate),
+    ));
+}
+
+pub fn default_character_actions() -> impl Bundle {
+    actions!(CharacterController[
+        (
+            Action::<MoveAction>::new(),
+            DeadZone::default(),
+            Bindings::spawn((Cardinal::wasd_keys(), Axial::left_stick())),
+        ),
+        (
+            Action::<LookAction>::new(),
+            Bindings::spawn((
+                Spawn((Binding::mouse_motion(), Scale::splat(0.0025))),
+                Axial::right_stick().with((Scale::splat(0.06), DeadZone::default())),
+            )),
+        ),
+        (Action::<JumpAction>::new(), bindings![KeyCode::Space, GamepadButton::South]),
+        (
+            Action::<SprintAction>::new(),
+            bindings![KeyCode::ShiftLeft, GamepadButton::LeftTrigger2],
+        ),
+        (
+            Action::<CrouchAction>::new(),
+            bindings![KeyCode::ControlLeft, KeyCode::KeyC, GamepadButton::East],
+        ),
+        (
+            Action::<AscendAction>::new(),
+            bindings![KeyCode::KeyQ, GamepadButton::LeftTrigger],
+        ),
+        (
+            Action::<TraverseAction>::new(),
+            bindings![KeyCode::KeyE, GamepadButton::RightTrigger],
+        ),
+    ])
+}
+
+pub fn spawn_demo_instructions(commands: &mut Commands, title: &str, extra_lines: &[&str]) {
+    let mut text = String::new();
+    text.push_str(title);
+    text.push_str("\nWASD / Left Stick: move\nMouse / Right Stick: look\nSpace: jump\nShift: sprint\nCtrl or C: crouch\nQ: ascend when flying or swimming\nE: traversal ability\nPane: toggle flight and tuning\nLeft Click: lock cursor\nEsc: release cursor");
+    for line in extra_lines {
+        text.push('\n');
+        text.push_str(line);
+    }
+
+    commands.spawn((
+        Name::new(format!("{title} Instructions")),
+        DemoInstructions,
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(20.0),
+            top: Val::Px(20.0),
+            width: Val::Px(340.0),
+            padding: UiRect::all(Val::Px(14.0)),
+            border_radius: BorderRadius::all(Val::Px(16.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.05, 0.07, 0.10, 0.82)),
+        Text::new(text),
+        TextFont {
+            font_size: 15.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        ZIndex(10),
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -240,8 +323,7 @@ pub fn sync_controller_pane(
     pane.step_size = controller.step_size;
     pane.air_acceleration_hz = controller.air_acceleration_hz;
     pane.look_sensitivity = look.sensitivity.x;
-    pane.inherit_support_yaw =
-        controller.support_rotation_policy == SupportRotationPolicy::YawOnly;
+    pane.inherit_support_yaw = controller.support_rotation_policy == SupportRotationPolicy::YawOnly;
     if let Some((enabled, speed, noclip)) = flight_snapshot {
         pane.flight_enabled = enabled;
         pane.flight_speed = speed;
@@ -470,7 +552,7 @@ pub fn spawn_water_volume(
         Transform::from_translation(center),
         RigidBody::Static,
         Collider::cuboid(size.x, size.y, size.z),
-        saddle_character_controller::WaterVolume::default(),
+        SwimVolume::default(),
     ));
 }
 

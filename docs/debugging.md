@@ -22,12 +22,12 @@ That usually tells you whether the problem is:
 
 | Symptom | Likely Cause | What To Inspect |
 | --- | --- | --- |
-| No movement at all | no `actions!(CharacterController[..])` bindings, inactive context, or simulation schedule not running | `AccumulatedInput`, `ContextActivity<CharacterController>`, your injected schedule wiring |
+| No movement at all | `AccumulatedInput` never changes, your input adapter is missing, or the simulation schedule is not running | `AccumulatedInput`, your adapter plugin, your injected schedule wiring |
 | Jump press feels lost | buffer too short or simulation running less often than expected | `AccumulatedInput.jump_pressed_for`, `jump_input_buffer`, fixed timestep |
 | Character slides on expected floor | `min_walk_angle` too strict or `MovementSurface.slide_only = true` | `CharacterControllerState.ground`, floor normal, `MovementSurface` |
 | Platform carry feels wrong | wrong `SupportVelocityPolicy` or detach grace too long/short | `CharacterControllerState.support_velocity`, `SupportBodyChanged`, `support_detach_grace` |
 | Cannot stand back up | blocked uncrouch due to geometry overhead | `CharacterControllerState.crouching`, nearby collider layout |
-| Water never activates | missing `WaterVolume`, missing `CharacterSwimming`, or sensor overlap not happening | `CharacterControllerState.water_level`, `CollidingEntities`, water collider setup |
+| Swim volume never activates | missing `CharacterControllerEnvironmentPlugin`, missing `SwimVolume`, missing `CharacterSwimming`, or sensor overlap not happening | `EnvironmentModifiers`, `CollidingEntities`, swim collider setup |
 | Mantle never triggers | traversal action not buffered or ledge top not walkable | `AccumulatedInput.traverse_pressed_for`, `CharacterMantle`, target surface normal |
 
 ## BRP Workflows
@@ -93,4 +93,4 @@ For richer runtime debugging in this workspace, prefer the dedicated crate-local
 cargo run -p saddle-character-controller-lab
 ```
 
-It keeps the runtime generic while exposing an overlay with support motion, cast counts, water modifiers, and buffered inputs.
+It keeps the runtime generic while exposing an overlay with support motion, cast counts, environment modifiers, and buffered inputs.

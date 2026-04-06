@@ -17,11 +17,17 @@ use saddle_animation_ik::{
     LookAtTarget,
 };
 use saddle_character_controller::{
-    AccumulatedInput, AscendAction, CharacterController, CharacterControllerPlugin,
-    CharacterControllerState, CharacterControllerSystems, CharacterFlying, CharacterLook,
-    CharacterMantle, CharacterMotionStats, CharacterPush, CharacterSwimming, CharacterWallKick,
-    CrouchAction, FlightCollisionMode, JumpAction, LookAction, MoveAction, MovementSurface,
-    SprintAction, SupportRotationPolicy, SupportVelocityPolicy, TraverseAction, WaterVolume,
+    AccumulatedInput, CharacterController, CharacterControllerPlugin, CharacterControllerState,
+    CharacterControllerSystems, CharacterFlying, CharacterLook, CharacterMantle,
+    CharacterMotionStats, CharacterPush, CharacterWallKick, FlightCollisionMode, MovementSurface,
+    SupportRotationPolicy, SupportVelocityPolicy,
+    adapters::enhanced_input::{
+        AscendAction, CharacterControllerEnhancedInputPlugin, CrouchAction, JumpAction, LookAction,
+        MoveAction, SprintAction, TraverseAction,
+    },
+    convenience::environment::{
+        CharacterControllerEnvironmentPlugin, CharacterSwimming, SwimVolume,
+    },
 };
 use saddle_character_state_machine::{
     CharacterAnimationFacts, CharacterAnimationSelection, CharacterStateMachine,
@@ -173,6 +179,8 @@ fn main() {
         DefaultPlugins,
         PhysicsPlugins::default(),
         CharacterControllerPlugin::always_on(FixedUpdate),
+        CharacterControllerEnhancedInputPlugin,
+        CharacterControllerEnvironmentPlugin::new(FixedUpdate),
         CharacterStateMachinePlugin::always_on(Update),
         IkPlugin::default(),
         pane_plugins(),
@@ -764,6 +772,11 @@ fn sync_overlay(
 
     text.0.clear();
     let _ = writeln!(text.0, "Character Controller Lab");
+    let _ = writeln!(
+        text.0,
+        "controls: WASD move | mouse look | Space jump | E traverse | Q ascend | Left Click lock | Esc unlock"
+    );
+    let _ = writeln!(text.0, "pane: tweak controller, flight, and IK live");
     let _ = writeln!(text.0, "mode: {:?}", state.movement_mode);
     let _ = writeln!(text.0, "ground: {ground_name}");
     let _ = writeln!(
@@ -775,10 +788,7 @@ fn sync_overlay(
     let _ = writeln!(
         text.0,
         "env: {:?} speed={:.2} accel={:.2} gravity={:.2}",
-        env.depth,
-        env.speed_multiplier,
-        env.acceleration_multiplier,
-        env.gravity_multiplier
+        env.depth, env.speed_multiplier, env.acceleration_multiplier, env.gravity_multiplier
     );
     let _ = writeln!(
         text.0,
@@ -1094,7 +1104,7 @@ fn spawn_water_volume(
         Transform::from_translation(center),
         RigidBody::Static,
         Collider::cuboid(size.x, size.y, size.z),
-        WaterVolume {
+        SwimVolume {
             speed_multiplier: 0.55,
             acceleration_multiplier: 0.8,
             gravity_multiplier: 0.4,

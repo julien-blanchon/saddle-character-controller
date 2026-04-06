@@ -5388,6 +5388,7 @@ version = "0.1.0"
 dependencies = [
  "avian3d",
  "bevy",
+ "bevy_enhanced_input",
  "bevy_flair",
  "bevy_input_focus",
  "bevy_ui_widgets",

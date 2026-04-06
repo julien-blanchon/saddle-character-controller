@@ -10,22 +10,21 @@
 use std::time::Duration;
 
 use bevy::prelude::*;
-use bevy_enhanced_input::prelude::*;
+use common::{
+    DemoFixedSystems, DemoPlayer, ThirdPersonCamera, add_demo_controller_plugins,
+    animate_platforms, default_character_actions, follow_third_person_camera, spawn_block,
+    spawn_controller_visual, spawn_demo_instructions, spawn_flat_ground, spawn_lighting,
+    spawn_platform, spawn_stairs,
+};
 use saddle_character_controller::{
-    AscendAction, CharacterController, CharacterControllerPlugin, CharacterControllerSystems,
-    CharacterFlying, CharacterLook, CharacterMantle, CharacterPush, CharacterSwimming,
-    CrouchAction, JumpAction, LookAction, MoveAction, SprintAction, TraverseAction,
+    CharacterController, CharacterControllerSystems, CharacterFlying, CharacterLook,
+    CharacterMantle, CharacterPush, convenience::environment::CharacterSwimming,
 };
 use saddle_character_controller_example_common as common;
-use common::{
-    DemoFixedSystems, DemoPlayer, ThirdPersonCamera, animate_platforms,
-    follow_third_person_camera, spawn_block, spawn_controller_visual, spawn_flat_ground,
-    spawn_lighting, spawn_platform, spawn_stairs,
-};
 
 fn main() -> AppExit {
     let mut app = common::base_app("character_controller third_person");
-    app.add_plugins(CharacterControllerPlugin::always_on(FixedUpdate));
+    add_demo_controller_plugins(&mut app);
 
     app.configure_sets(
         FixedUpdate,
@@ -48,30 +47,83 @@ fn setup_scene(
 ) {
     spawn_lighting(&mut commands);
     spawn_flat_ground(&mut commands, &mut meshes, &mut materials, 120.0);
+    spawn_demo_instructions(
+        &mut commands,
+        "Third Person",
+        &[
+            "Watch the visible body and camera framing while running the course. Mantle, sprint, and swimming are enabled.",
+        ],
+    );
 
     // -- Obstacles (same as basic + traversal) ------------------------------
-    spawn_block(&mut commands, &mut meshes, &mut materials,
-        "Crate Cluster A", Vec3::new(-4.0, 1.0, 2.0), Vec3::new(2.0, 2.0, 2.0),
-        Color::srgb(0.56, 0.39, 0.26));
-    spawn_block(&mut commands, &mut meshes, &mut materials,
-        "Crate Cluster B", Vec3::new(4.5, 0.5, -3.0), Vec3::new(3.0, 1.0, 3.0),
-        Color::srgb(0.39, 0.47, 0.62));
-    spawn_block(&mut commands, &mut meshes, &mut materials,
-        "Crate Cluster C", Vec3::new(0.0, 1.5, -10.0), Vec3::new(2.5, 3.0, 2.5),
-        Color::srgb(0.31, 0.58, 0.47));
+    spawn_block(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        "Crate Cluster A",
+        Vec3::new(-4.0, 1.0, 2.0),
+        Vec3::new(2.0, 2.0, 2.0),
+        Color::srgb(0.56, 0.39, 0.26),
+    );
+    spawn_block(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        "Crate Cluster B",
+        Vec3::new(4.5, 0.5, -3.0),
+        Vec3::new(3.0, 1.0, 3.0),
+        Color::srgb(0.39, 0.47, 0.62),
+    );
+    spawn_block(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        "Crate Cluster C",
+        Vec3::new(0.0, 1.5, -10.0),
+        Vec3::new(2.5, 3.0, 2.5),
+        Color::srgb(0.31, 0.58, 0.47),
+    );
 
     // Traversal geometry — mantle blocks, tall wall, stairs, ledge.
-    spawn_block(&mut commands, &mut meshes, &mut materials,
-        "Mantle Block", Vec3::new(0.0, 0.75, -2.0), Vec3::new(2.0, 1.5, 2.0),
-        Color::srgb(0.35, 0.58, 0.44));
-    spawn_block(&mut commands, &mut meshes, &mut materials,
-        "Tall Wall", Vec3::new(8.0, 2.0, -6.0), Vec3::new(1.0, 4.0, 8.0),
-        Color::srgb(0.62, 0.32, 0.28));
-    spawn_stairs(&mut commands, &mut meshes, &mut materials,
-        Vec3::new(-10.0, 0.0, -8.0), 6, 1.0, 0.3, 2.0);
-    spawn_platform(&mut commands, &mut meshes, &mut materials,
-        "Traversal Ledge", Vec3::new(14.0, 2.6, 4.0), Vec3::new(6.0, 0.3, 3.0),
-        Color::srgb(0.44, 0.49, 0.68), None, None);
+    spawn_block(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        "Mantle Block",
+        Vec3::new(0.0, 0.75, -2.0),
+        Vec3::new(2.0, 1.5, 2.0),
+        Color::srgb(0.35, 0.58, 0.44),
+    );
+    spawn_block(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        "Tall Wall",
+        Vec3::new(8.0, 2.0, -6.0),
+        Vec3::new(1.0, 4.0, 8.0),
+        Color::srgb(0.62, 0.32, 0.28),
+    );
+    spawn_stairs(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        Vec3::new(-10.0, 0.0, -8.0),
+        6,
+        1.0,
+        0.3,
+        2.0,
+    );
+    spawn_platform(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        "Traversal Ledge",
+        Vec3::new(14.0, 2.6, 4.0),
+        Vec3::new(6.0, 0.3, 3.0),
+        Color::srgb(0.44, 0.49, 0.68),
+        None,
+        None,
+    );
 
     // -- Player character (third-person tuning) -----------------------------
     let controller = CharacterController {
@@ -86,31 +138,27 @@ fn setup_scene(
         ..default()
     };
 
-    let player = commands.spawn((
-        Name::new("Player"),
-        DemoPlayer,
-        controller,
-        look,
-        CharacterFlying::default(),
-        CharacterPush::default(),
-        CharacterSwimming::default(),
-        CharacterMantle::default(),
-        Visibility::Inherited,
-        Transform::from_xyz(0.0, 3.0, 12.0),
-        actions!(CharacterController[
-            (Action::<MoveAction>::new(), DeadZone::default(), Bindings::spawn((Cardinal::wasd_keys(), Axial::left_stick()))),
-            (Action::<LookAction>::new(), Bindings::spawn((Spawn((Binding::mouse_motion(), Scale::splat(0.0025))), Axial::right_stick().with((Scale::splat(0.06), DeadZone::default()))))),
-            (Action::<JumpAction>::new(), bindings![KeyCode::Space, GamepadButton::South]),
-            (Action::<SprintAction>::new(), bindings![KeyCode::ShiftLeft, GamepadButton::LeftTrigger2]),
-            (Action::<CrouchAction>::new(), bindings![KeyCode::ControlLeft, KeyCode::KeyC, GamepadButton::East]),
-            (Action::<AscendAction>::new(), bindings![KeyCode::KeyQ, GamepadButton::LeftTrigger]),
-            (Action::<TraverseAction>::new(), bindings![KeyCode::KeyE, GamepadButton::RightTrigger]),
-        ]),
-    )).id();
+    let player = commands
+        .spawn((
+            Name::new("Player"),
+            DemoPlayer,
+            controller,
+            look,
+            CharacterFlying::default(),
+            CharacterPush::default(),
+            CharacterSwimming::default(),
+            CharacterMantle::default(),
+            Visibility::Inherited,
+            Transform::from_xyz(0.0, 3.0, 12.0),
+            default_character_actions(),
+        ))
+        .id();
 
     // The player needs a visible body in third-person (in first-person it is invisible).
     spawn_controller_visual(
-        &mut commands, &mut meshes, &mut materials,
+        &mut commands,
+        &mut meshes,
+        &mut materials,
         player,
         Color::srgb(0.92, 0.44, 0.22),
     );

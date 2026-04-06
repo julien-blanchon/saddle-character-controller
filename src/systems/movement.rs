@@ -2,9 +2,10 @@ use crate::{
     CharacterController, CharacterControllerState, CharacterMantle, ExternalMotion,
     components::{
         CharacterColliderCache, CharacterControllerScratch, CharacterDash, CharacterFlying,
-        CharacterGravity, CharacterLook, CharacterMotionStats, CharacterPush, CharacterSwimming,
-        CharacterWallKick, FlightCollisionMode, PendingLanding,
+        CharacterGravity, CharacterLook, CharacterMotionStats, CharacterPush, CharacterWallKick,
+        FlightCollisionMode, PendingLanding,
     },
+    convenience::environment::CharacterSwimming,
     helpers::{
         ages_recently, apply_ground_friction, clamp_velocity, classify_mode, expire_old,
         ground_probe_distance, horizontal, horizontal_speed, inherited_support_rotation,
@@ -12,7 +13,7 @@ use crate::{
         quake_acceleration_delta, safe_dt, step_height_allowed, support_detach_velocity,
         travel_towards, wish_velocity_3d, wish_velocity_from_input,
     },
-    input::AccumulatedInput,
+    intent::AccumulatedInput,
     state::{
         ControllerMode, DashState, EnvironmentDepth, EnvironmentModifiers, GroundContact,
         MantleState,

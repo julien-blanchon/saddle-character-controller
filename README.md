@@ -1,12 +1,23 @@
 # Saddle Character Controller
 
-Reusable 3D kinematic character controller for Bevy, built on `avian3d` and `bevy_enhanced_input`.
+Reusable 3D kinematic character controller for Bevy, built on `avian3d`.
 
-The crate is meant to stay generic. It does not know about any project state machine, game vocabulary, or camera setup. Consumers wire it into their own schedules, attach optional traversal components as needed, and order against the public system sets.
-
-For always-on apps and examples, `CharacterControllerPlugin::always_on(FixedUpdate)` is the simplest entrypoint. For real games, prefer `CharacterControllerPlugin::new(...)` so activation and teardown stay aligned with your own state flow.
+The movement core is intentionally input-stack-agnostic. It owns simulation, state, and ordering hooks. Input mappings, swim-volume detection, and preset tuning now live in explicit adapter and convenience modules instead of being auto-installed by the core plugin.
 
 ## Quick Start
+
+### Core-only dependency
+
+```toml
+[dependencies]
+saddle-character-controller = { git = "https://github.com/julien-blanchon/saddle-character-controller", default-features = false }
+bevy = "0.18"
+avian3d = "0.6"
+```
+
+This gives you the controller runtime plus `AccumulatedInput`. Your game can write that component from any input stack it wants.
+
+### With the provided enhanced-input adapter
 
 ```toml
 [dependencies]
@@ -20,7 +31,16 @@ bevy_enhanced_input = "0.24"
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
-use saddle_character_controller::*;
+use saddle_character_controller::{
+    CharacterController,
+    CharacterControllerPlugin,
+    CharacterLook,
+    adapters::enhanced_input::{
+        AscendAction, CharacterControllerEnhancedInputPlugin, CrouchAction, JumpAction,
+        LookAction, MoveAction, SprintAction, TraverseAction,
+    },
+    convenience::environment::{CharacterControllerEnvironmentPlugin, CharacterSwimming},
+};
 
 #[derive(States, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum DemoState {
@@ -33,10 +53,14 @@ fn main() {
         .insert_resource(Time::<Fixed>::from_hz(60.0))
         .add_plugins((DefaultPlugins, PhysicsPlugins::default()))
         .init_state::<DemoState>()
-        .add_plugins(CharacterControllerPlugin::new(
-            OnEnter(DemoState::Gameplay),
-            OnExit(DemoState::Gameplay),
-            FixedUpdate,
+        .add_plugins((
+            CharacterControllerPlugin::new(
+                OnEnter(DemoState::Gameplay),
+                OnExit(DemoState::Gameplay),
+                FixedUpdate,
+            ),
+            CharacterControllerEnhancedInputPlugin,
+            CharacterControllerEnvironmentPlugin::new(FixedUpdate),
         ))
         .add_systems(Startup, setup)
         .run();
@@ -50,6 +74,7 @@ fn setup(mut commands: Commands) {
             sensitivity: Vec2::splat(0.0025),
             ..default()
         },
+        CharacterSwimming::default(),
         Transform::from_xyz(0.0, 2.0, 0.0),
         actions!(CharacterController[
             (
@@ -76,64 +101,57 @@ fn setup(mut commands: Commands) {
 
 ## Public API
 
+### Core runtime
+
 | Type | Purpose |
 | --- | --- |
-| `CharacterControllerPlugin` | Registers the controller runtime with injectable activate, deactivate, and update schedules |
+| `CharacterControllerPlugin` | Registers the simulation runtime with injectable activate, deactivate, and update schedules |
 | `CharacterControllerSystems` | Public ordering hooks: `ReadInput`, `PreMovement`, `Grounding`, `Movement`, `PostMovement`, `Presentation` |
-| `CharacterController` | Core movement tuning and shape configuration |
-| `CharacterControllerState` | Readable runtime state: mode, ground contact, support motion, crouch state, air jump tracking, dash state, and mantle state |
-| `AccumulatedInput` | Buffered action state consumed by the movement pipeline |
-| `CharacterLook` | Yaw/pitch and sensitivity state for camera-facing integrations |
+| `CharacterController` | Core movement tuning and collider configuration |
+| `AccumulatedInput` | Generic buffered input state consumed by the movement pipeline |
+| `CharacterControllerState` | Runtime state: movement mode, ground contact, support motion, crouch state, dash state, mantle state |
+| `CharacterLook` | Yaw/pitch state for camera-facing integrations |
 | `CharacterMotionStats` | Debug-friendly runtime stats such as speed, grounded time, support entity, and cast count |
-| `CharacterFlying` | Optional flying / spectator configuration with slide or no-clip collision modes |
-| `CharacterSwimming` | Optional swimming configuration |
+| `CharacterFlying` | Optional flying / spectator configuration |
 | `CharacterMantle` | Optional mantle / ledge-pull configuration |
 | `CharacterWallKick` | Optional wall-kick configuration |
-| `CharacterDash` | Optional dash ability with configurable speed, duration, cooldown, and air dash budget |
-| `CharacterGravity` | Optional per-entity gravity override (magnitude and direction) |
+| `CharacterDash` | Optional dash ability |
+| `CharacterGravity` | Optional per-entity gravity override |
 | `CharacterPush` | Optional rigidbody push hook |
-| `ExternalMotion` | Generic external velocity channel for wind, launchers, recoil, or gameplay impulses |
+| `ExternalMotion` | Generic external velocity channel for gameplay impulses |
 | `EnvironmentModifiers` | Runtime environment state: depth classification, active volume, and speed/acceleration/gravity multipliers |
-| `EnvironmentVolume` | Generic environment volume with configurable multipliers and optional swim behavior |
-| `ControllerMode` | Toggle controller behavior: `Enabled`, `SenseOnly` (probe-only), or `Disabled` |
-| `CharacterPreset` | Factory methods for common controller configurations: `default_fps()`, `platformer()`, `explorer()`, `arena()` |
+| `ControllerMode` | Toggle controller behavior: `Enabled`, `SenseOnly`, or `Disabled` |
 | `MovementSurface` | Per-surface traction, acceleration, speed, jump, conveyor, and inheritance overrides |
-| `SupportVelocityPolicy` | Support inheritance mode: `None`, `Horizontal`, `Full` |
-| `SupportRotationPolicy` | Support rotation inheritance mode for moving and rotating platforms |
-| `FlightCollisionMode` | Flying collision behavior: `Slide` or `NoClip` |
-| `WaterVolume` | Convenience swim volume marker with per-volume speed/acceleration/gravity multipliers |
 | Messages | `CharacterJumped`, `CharacterLanded`, `MovementModeChanged`, `SupportBodyChanged` |
 
-## Current Feature Scope
+### Adapter and convenience modules
 
-Supported in v0.1:
+| Module | Purpose |
+| --- | --- |
+| `adapters::enhanced_input` | Optional `bevy_enhanced_input` action schema plus `CharacterControllerEnhancedInputPlugin` |
+| `convenience::environment` | Optional environment-volume detector plugin plus `CharacterSwimming`, `EnvironmentVolume`, and `SwimVolume` |
+| `convenience::presets` | Opinionated demo/prototype presets such as `CharacterControllerPreset::platformer()` |
+
+## Feature Scope
+
+Core runtime:
 
 - Quake / Source style ground acceleration, air acceleration, and friction ordering
 - Coyote time and jump input buffering
-- Variable-height jump (extra gravity on early button release for responsive feel)
-- Air jump tracking (configurable double/triple jumps via `max_air_jumps`)
-- Dash ability as optional composable component with cooldown, air dash budget, and gravity cancel
-- Capsule-based ground probing, slope classification, snap-to-ground, and step-up motion
-- Moving-platform support with detach grace, optional yaw inheritance from rotating supports, and per-surface inheritance override
-- Optional flying / spectator mode with slide or no-clip collision handling
-- Crouch shape swap with uncrouch obstruction check
-- Generic environment volumes with per-volume speed/acceleration/gravity multipliers (replaces hardcoded water state)
-- Swimming volumes and vertical swim input (now built on the generic `EnvironmentVolume` system)
-- Mantling and wall kicks as optional traversal layers
+- Variable-height jump and configurable air jumps
+- Dash ability, flying, mantling, wall kicks, crouch shape swap
+- Capsule-based grounding, snap-to-ground, step-up motion
+- Moving-platform support with detach grace and optional yaw inheritance
 - Per-surface movement modifiers and conveyor velocity
-- Push impulses into dynamic rigidbodies
-- Per-entity gravity override (`CharacterGravity` component)
-- Controller mode toggle (`Enabled` / `SenseOnly` / `Disabled`)
-- Configuration presets for common game types (`CharacterPreset::platformer()`, etc.)
+- Per-entity gravity override and external motion injection
 - Runtime state reflection and optional debug gizmos
 
-Deferred or intentionally minimal in v0.1:
+Optional convenience layers:
 
-- Ladder / climb-volume support
-- Slide crouch and prone-style extra shape profiles
-- Root-motion hooks and animation graph integration
-- Built-in pickup / carry logic
-- Deterministic serialization and prediction helpers
+- `bevy_enhanced_input` mapping adapter
+- Environment-volume detection into `EnvironmentModifiers`
+- Swim-mode tuning and `SwimVolume`
+- Preset tuning helpers for demos and quick prototypes
 
 ## Pipeline
 
@@ -146,7 +164,7 @@ The runtime is staged and orderable:
 5. `PostMovement`
 6. `Presentation`
 
-`bevy_enhanced_input` action events are evaluated in `PreUpdate`, then buffered into `AccumulatedInput`. The actual controller simulation can run on any injected schedule, including `FixedUpdate`.
+The core plugin only advances buffered timers and simulation. Adapter plugins are responsible for writing `AccumulatedInput`, and environment helpers are responsible for writing `EnvironmentModifiers`.
 
 ## Examples
 
@@ -157,23 +175,21 @@ The runtime is staged and orderable:
 | `moving_platforms` | Support inheritance, detach grace, and conveyor-like surfaces | `cargo run -p saddle-character-controller-example-moving-platforms` |
 | `advanced_movement` | Auto-bhop, surf-friendly surfaces, debug draw, and higher-speed tuning | `cargo run -p saddle-character-controller-example-advanced-movement` |
 | `traversal` | Mantle and wall-kick setup on a simple obstacle course | `cargo run -p saddle-character-controller-example-traversal` |
-| `water` | Entering, swimming through, and exiting water volumes | `cargo run -p saddle-character-controller-example-water` |
+| `water` | Entering, swimming through, and exiting a `SwimVolume` | `cargo run -p saddle-character-controller-example-water` |
 | `third_person` | Generic third-person follow camera driven from controller state | `cargo run -p saddle-character-controller-example-third-person` |
 | `stress_many_controllers` | Lightweight many-controller perf smoke | `cargo run -p saddle-character-controller-example-stress-many-controllers` |
 
-Every standalone example now includes a live `saddle-pane` debug panel so the main controller tuning values can be edited in real time without recompiling.
+Every standalone example includes a live `saddle-pane` debug panel and an on-screen control overlay.
 
 ## Workspace Lab
 
-The standalone examples verify the shared crate in isolation. The workspace also includes a crate-local lab app for richer integration checks at
-`shared/character/saddle-character-controller/examples/lab`:
+The workspace also includes a crate-local lab app for richer integration checks at `examples/lab`:
 
 ```bash
 cargo run -p saddle-character-controller-lab
 ```
 
-That lab now doubles as the batch integration showcase for `saddle-character-controller`,
-`saddle-character-state-machine`, and `saddle-animation-ik`: controller movement drives a simple locomotion state machine and a look-at IK rig, all exposed through the pane UI and covered by crate-local E2E scenarios.
+The lab integrates the controller with `saddle-character-state-machine` and `saddle-animation-ik`, exposes runtime diagnostics on-screen, and ships crate-local E2E scenarios.
 
 ## More Docs
 

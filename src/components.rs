@@ -124,69 +124,6 @@ impl Default for CharacterController {
     }
 }
 
-/// Configuration presets for common character controller setups.
-///
-/// Presets return a [`CharacterController`] with tuned defaults. Consumers can use
-/// them as starting points and override individual fields.
-///
-/// ```rust
-/// # use saddle_character_controller::*;
-/// let controller = CharacterPreset::platformer();
-/// // Override a single field:
-/// let controller = CharacterController { speed: 14.0, ..CharacterPreset::platformer() };
-/// ```
-pub struct CharacterPreset;
-
-impl CharacterPreset {
-    /// Standard FPS / exploration controller with Quake-style movement.
-    pub fn default_fps() -> CharacterController {
-        CharacterController::default()
-    }
-
-    /// Responsive platformer: higher gravity, larger coyote time, double jump.
-    pub fn platformer() -> CharacterController {
-        CharacterController {
-            gravity: 38.0,
-            fall_gravity_multiplier: 1.6,
-            jump_cut_gravity_multiplier: 4.0,
-            jump_height: 2.4,
-            max_air_jumps: 1,
-            coyote_time: Duration::from_millis(130),
-            jump_input_buffer: Duration::from_millis(180),
-            speed: 10.0,
-            air_acceleration_hz: 18.0,
-            ..Default::default()
-        }
-    }
-
-    /// Slow, deliberate exploration controller (walking simulator style).
-    pub fn explorer() -> CharacterController {
-        CharacterController {
-            speed: 5.0,
-            sprint_speed_scale: 1.2,
-            gravity: 20.0,
-            jump_height: 1.0,
-            air_acceleration_hz: 4.0,
-            ..Default::default()
-        }
-    }
-
-    /// Fast arena / bunny-hop tuning with auto-bhop and air strafe.
-    pub fn arena() -> CharacterController {
-        CharacterController {
-            speed: 14.0,
-            sprint_speed_scale: 1.0,
-            air_speed: 3.0,
-            max_air_wish_speed: 1.2,
-            air_acceleration_hz: 30.0,
-            auto_bhop: true,
-            gravity: 24.0,
-            jump_height: 2.0,
-            ..Default::default()
-        }
-    }
-}
-
 #[derive(Reflect, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlightCollisionMode {
     Slide,
@@ -215,26 +152,6 @@ impl Default for CharacterFlying {
             drag_hz: 6.0,
             vertical_speed_scale: 1.0,
             collision_mode: FlightCollisionMode::Slide,
-        }
-    }
-}
-
-#[derive(Component, Reflect, Debug, Clone)]
-#[reflect(Component, Debug)]
-pub struct CharacterSwimming {
-    pub acceleration_hz: f32,
-    pub gravity: f32,
-    pub slowdown: f32,
-    pub ascent_speed_scale: f32,
-}
-
-impl Default for CharacterSwimming {
-    fn default() -> Self {
-        Self {
-            acceleration_hz: 6.0,
-            gravity: 2.4,
-            slowdown: 0.6,
-            ascent_speed_scale: 1.0,
         }
     }
 }
@@ -289,8 +206,8 @@ impl Default for CharacterWallKick {
 
 /// Optional dash ability. Attach to a controller entity to enable dashing.
 ///
-/// When triggered via [`DashAction`](crate::DashAction), the controller enters a
-/// direction-locked, gravity-free burst of movement for the configured duration.
+/// When triggered by your input adapter, the controller enters a direction-locked,
+/// gravity-free burst of movement for the configured duration.
 #[derive(Component, Reflect, Debug, Clone)]
 #[reflect(Component, Debug)]
 pub struct CharacterDash {

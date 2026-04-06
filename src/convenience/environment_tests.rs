@@ -2,12 +2,13 @@ use avian3d::prelude::*;
 use bevy::{ecs::entity::EntityHashSet, prelude::*};
 
 use crate::{
-    CharacterController, CharacterControllerState, CharacterSwimming, WaterVolume,
+    CharacterController, CharacterControllerState,
+    convenience::environment::{CharacterSwimming, SwimVolume},
     state::{EnvironmentDepth, EnvironmentModifiers},
 };
 
 #[test]
-fn water_state_uses_deepest_overlap_and_applies_volume_multipliers() {
+fn swim_state_uses_deepest_overlap_and_applies_volume_multipliers() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .add_systems(Update, super::update_environment_state);
@@ -18,7 +19,7 @@ fn water_state_uses_deepest_overlap_and_applies_volume_multipliers() {
             Collider::cuboid(4.0, 0.6, 4.0),
             Position(Vec3::new(0.0, 0.25, 0.0)),
             Rotation::default(),
-            WaterVolume {
+            SwimVolume {
                 speed_multiplier: 0.8,
                 acceleration_multiplier: 0.9,
                 gravity_multiplier: 0.7,
@@ -31,7 +32,7 @@ fn water_state_uses_deepest_overlap_and_applies_volume_multipliers() {
             Collider::cuboid(4.0, 3.0, 4.0),
             Position(Vec3::new(0.0, 1.5, 0.0)),
             Rotation::default(),
-            WaterVolume {
+            SwimVolume {
                 speed_multiplier: 0.45,
                 acceleration_multiplier: 0.6,
                 gravity_multiplier: 0.35,
@@ -69,18 +70,18 @@ fn water_state_uses_deepest_overlap_and_applies_volume_multipliers() {
 }
 
 #[test]
-fn water_state_resets_when_swimming_is_disabled() {
+fn swim_state_resets_when_swimming_is_disabled() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .add_systems(Update, super::update_environment_state);
 
-    let water = app
+    let swim_volume = app
         .world_mut()
         .spawn((
             Collider::cuboid(4.0, 3.0, 4.0),
             Position(Vec3::new(0.0, 1.5, 0.0)),
             Rotation::default(),
-            WaterVolume {
+            SwimVolume {
                 speed_multiplier: 0.2,
                 acceleration_multiplier: 0.3,
                 gravity_multiplier: 0.4,
@@ -89,9 +90,8 @@ fn water_state_resets_when_swimming_is_disabled() {
         .id();
 
     let mut overlaps = EntityHashSet::default();
-    overlaps.insert(water);
+    overlaps.insert(swim_volume);
 
-    // No CharacterSwimming component → should reset to defaults.
     let controller = app
         .world_mut()
         .spawn((
@@ -99,7 +99,7 @@ fn water_state_resets_when_swimming_is_disabled() {
             CharacterControllerState::default(),
             EnvironmentModifiers {
                 depth: EnvironmentDepth::Submerged,
-                active_volume: Some(water),
+                active_volume: Some(swim_volume),
                 speed_multiplier: 0.2,
                 acceleration_multiplier: 0.3,
                 gravity_multiplier: 0.4,

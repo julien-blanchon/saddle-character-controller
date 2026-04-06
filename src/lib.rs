@@ -1,6 +1,10 @@
+#[cfg(feature = "enhanced-input")]
+pub mod adapters;
+pub mod convenience;
+
 mod components;
 mod helpers;
-mod input;
+mod intent;
 mod messages;
 mod state;
 mod surfaces;
@@ -8,21 +12,17 @@ mod systems;
 
 pub use components::{
     CharacterController, CharacterDash, CharacterFlying, CharacterGravity, CharacterLook,
-    CharacterMantle, CharacterMotionStats, CharacterPreset, CharacterPush, CharacterSwimming,
-    CharacterWallKick, ExternalMotion, FlightCollisionMode,
+    CharacterMantle, CharacterMotionStats, CharacterPush, CharacterWallKick, ExternalMotion,
+    FlightCollisionMode,
 };
-pub use input::{
-    AccumulatedInput, AscendAction, CrouchAction, DashAction, JumpAction, LookAction, MoveAction,
-    SprintAction, TraverseAction,
-};
+pub use intent::AccumulatedInput;
 pub use messages::{CharacterJumped, CharacterLanded, MovementModeChanged, SupportBodyChanged};
 pub use state::{
     CharacterControllerState, ControllerMode, DashState, EnvironmentDepth, EnvironmentModifiers,
     GroundContact, MantleState, MovementMode, WaterLevel,
 };
 pub use surfaces::{
-    CharacterControllerDebugDraw, EnvironmentVolume, MovementSurface, SupportRotationPolicy,
-    SupportVelocityPolicy, WaterVolume,
+    CharacterControllerDebugDraw, MovementSurface, SupportRotationPolicy, SupportVelocityPolicy,
 };
 
 use bevy::{
@@ -30,7 +30,6 @@ use bevy::{
     ecs::{intern::Interned, schedule::ScheduleLabel},
     prelude::*,
 };
-use bevy_enhanced_input::prelude::*;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CharacterControllerSystems {
@@ -71,12 +70,7 @@ impl CharacterControllerPlugin {
 
 impl Plugin for CharacterControllerPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<EnhancedInputPlugin>() {
-            app.add_plugins(EnhancedInputPlugin);
-        }
-
-        app.add_input_context::<CharacterController>()
-            .init_resource::<CharacterControllerDebugDraw>()
+        app.init_resource::<CharacterControllerDebugDraw>()
             .init_resource::<systems::activation::CharacterControllerRuntime>()
             .add_message::<CharacterJumped>()
             .add_message::<CharacterLanded>()
@@ -92,13 +86,11 @@ impl Plugin for CharacterControllerPlugin {
             .register_type::<CharacterMantle>()
             .register_type::<CharacterMotionStats>()
             .register_type::<CharacterPush>()
-            .register_type::<CharacterSwimming>()
             .register_type::<CharacterWallKick>()
             .register_type::<ControllerMode>()
             .register_type::<DashState>()
             .register_type::<EnvironmentDepth>()
             .register_type::<EnvironmentModifiers>()
-            .register_type::<EnvironmentVolume>()
             .register_type::<ExternalMotion>()
             .register_type::<FlightCollisionMode>()
             .register_type::<GroundContact>()
@@ -108,27 +100,6 @@ impl Plugin for CharacterControllerPlugin {
             .register_type::<MovementSurface>()
             .register_type::<SupportRotationPolicy>()
             .register_type::<SupportVelocityPolicy>()
-            .register_type::<WaterVolume>()
-            .add_observer(input::cache_move_axis)
-            .add_observer(input::clear_move_axis_on_cancel)
-            .add_observer(input::clear_move_axis_on_complete)
-            .add_observer(input::cache_jump_press)
-            .add_observer(input::clear_jump_held_on_cancel)
-            .add_observer(input::clear_jump_held_on_complete)
-            .add_observer(input::cache_traverse_press)
-            .add_observer(input::cache_dash_press)
-            .add_observer(input::cache_sprint_active)
-            .add_observer(input::clear_sprint_active_on_cancel)
-            .add_observer(input::clear_sprint_active_on_complete)
-            .add_observer(input::cache_crouch_active)
-            .add_observer(input::clear_crouch_active_on_cancel)
-            .add_observer(input::clear_crouch_active_on_complete)
-            .add_observer(input::cache_ascend_active)
-            .add_observer(input::clear_ascend_active_on_cancel)
-            .add_observer(input::clear_ascend_active_on_complete)
-            .add_observer(input::apply_look_axis)
-            .add_observer(input::clear_look_axis_on_cancel)
-            .add_observer(input::clear_look_axis_on_complete)
             .add_systems(
                 self.activate_schedule,
                 systems::activation::activate_runtime,
@@ -152,13 +123,11 @@ impl Plugin for CharacterControllerPlugin {
             .add_systems(
                 self.update_schedule,
                 (
-                    input::tick_input_buffers.in_set(CharacterControllerSystems::ReadInput),
+                    intent::tick_input_buffers.in_set(CharacterControllerSystems::ReadInput),
                     systems::prepare::setup_new_controllers
                         .in_set(CharacterControllerSystems::PreMovement),
                     systems::prepare::refresh_character_shapes
                         .in_set(CharacterControllerSystems::PreMovement),
-                    systems::environment::update_environment_state
-                        .in_set(CharacterControllerSystems::Grounding),
                     systems::movement::run_controllers.in_set(CharacterControllerSystems::Movement),
                     systems::finalize::apply_push_forces
                         .in_set(CharacterControllerSystems::PostMovement),

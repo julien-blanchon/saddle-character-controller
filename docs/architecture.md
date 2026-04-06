@@ -2,26 +2,42 @@
 
 ## Overview
 
-`saddle-character-controller` keeps a stable movement core and layers optional traversal features on top of it. The core entity owns:
+`saddle-character-controller` now has three layers:
 
-- immutable-ish tuning in `CharacterController`
-- runtime state in `CharacterControllerState`
-- buffered actions in `AccumulatedInput`
-- derived debug metrics in `CharacterMotionStats`
+1. Core runtime
+   - simulation, state, messages, and ordering hooks
+   - consumes `AccumulatedInput`
+   - consumes `EnvironmentModifiers`
+2. Input adapters
+   - write `AccumulatedInput`
+   - example: `adapters::enhanced_input::CharacterControllerEnhancedInputPlugin`
+3. Convenience helpers
+   - write `EnvironmentModifiers`
+   - provide opinionated presets or demo-oriented setup
+   - example: `convenience::environment::CharacterControllerEnvironmentPlugin`
 
-Optional abilities are additive components:
+That keeps the controller reusable in projects that do not use `bevy_enhanced_input`, do not want built-in swim-volume detection, or want their own tuning catalog.
+
+## Core Entity Layout
+
+The core entity owns:
+
+- `CharacterController`
+- `CharacterControllerState`
+- `AccumulatedInput`
+- `CharacterMotionStats`
+
+Optional runtime abilities remain additive:
 
 - `CharacterFlying`
-- `CharacterSwimming`
 - `CharacterMantle`
 - `CharacterWallKick`
-- `CharacterPush`
 - `CharacterDash`
 - `CharacterGravity`
+- `CharacterPush`
+- `ExternalMotion`
 
-Environment interaction is handled by a separate `EnvironmentModifiers` component (required, auto-added) that decouples volume detection from the core state struct.
-
-That keeps the base crate useful for a plain FPS or exploration controller without forcing every consumer into every advanced feature.
+Swim-mode tuning now lives in `convenience::environment::CharacterSwimming` instead of the root API surface.
 
 ## Update Pipeline
 
@@ -34,100 +50,85 @@ The public pipeline is exposed through `CharacterControllerSystems`:
 5. `PostMovement`
 6. `Presentation`
 
-Within that flow, the runtime currently does:
+Within that flow, the core runtime currently does:
 
-1. Tick buffered jump / traverse timers.
+1. Tick buffered jump / traverse / dash timers.
 2. Initialize newly added controllers and refresh active collider shapes.
-3. Classify environment depth from overlapping `WaterVolume` and `EnvironmentVolume` sensors into `EnvironmentModifiers`.
-4. Depenetrate stale overlaps.
-5. Probe ground using the active capsule.
-6. Resolve support-body velocity and detach grace.
-7. Resolve crouch shape transitions.
-8. Expire stale buffered actions.
-9. Apply movement-mode-specific acceleration, friction, gravity, jump, flying, mantle, wall-kick, dash, and slide motion.
-10. Re-probe ground after motion and update support attachment.
-11. Publish movement messages and clear per-frame look accumulation.
-12. Draw optional debug gizmos in `PostUpdate`.
+3. Depenetrate stale overlaps.
+4. Probe ground using the active capsule.
+5. Resolve support-body velocity and detach grace.
+6. Resolve crouch shape transitions.
+7. Expire stale buffered actions.
+8. Apply movement-mode-specific acceleration, friction, gravity, jump, flying, mantle, wall-kick, dash, and slide motion.
+9. Re-probe ground after motion and update support attachment.
+10. Publish movement messages and clear per-frame look accumulation.
+11. Draw optional debug gizmos in `PostUpdate`.
+
+Environment detection is no longer auto-installed by the core plugin. If you use the provided helper plugin, it schedules its volume classification in `CharacterControllerSystems::Grounding`.
 
 ## Input Model
 
-The crate uses `bevy_enhanced_input` action events and stores the results in `AccumulatedInput`.
+The core plugin never assumes a concrete input stack.
 
-Important detail:
+The contract is:
 
-- action evaluation happens in `PreUpdate`
-- controller simulation can run in any injected schedule, typically `FixedUpdate`
-- buffered timers allow jump and traverse input to survive between render-rate and fixed-rate updates
+- some upstream system writes into `AccumulatedInput`
+- the controller consumes that buffer on its injected simulation schedule
+- buffered timers let jump / traverse / dash input survive between render-rate updates and fixed-rate simulation
 
-This is why the crate can stay reusable even though `bevy_enhanced_input` registers contexts against compile-time schedules while the controller plugin uses runtime-provided `Interned<dyn ScheduleLabel>` activation and simulation schedules.
+The optional enhanced-input adapter keeps the old behavior, but it is explicit now:
+
+- add `adapters::enhanced_input::CharacterControllerEnhancedInputPlugin`
+- attach `actions!(CharacterController[..])` to entities that should receive those bindings
+
+Projects using another stack can skip that plugin and write `AccumulatedInput` directly.
+
+## Environment Model
+
+`EnvironmentModifiers` is still the bridge between movement and world context:
+
+- `depth`
+- `active_volume`
+- `speed_multiplier`
+- `acceleration_multiplier`
+- `gravity_multiplier`
+
+The movement core reads those resolved modifiers, but it does not decide how they are produced.
+
+The convenience environment plugin provides one implementation:
+
+- `EnvironmentVolume` for generic speed / acceleration / gravity multipliers
+- `SwimVolume` for swim-mode depth classification when `CharacterSwimming` is present
+
+Projects can replace that plugin with their own detector systems without changing the controller runtime.
 
 ## Simulation vs Presentation
 
-The controller itself only owns logical movement state:
+The controller owns logical state only:
 
 - current movement mode
 - support velocity and support entity
-- environment depth and modifiers (via `EnvironmentModifiers`)
+- environment depth and modifiers
 - air jump count and dash state
 - mantle target
 - view orientation
 
-The crate does not impose a specific camera or render-body architecture. Consumers can:
+The crate does not impose a camera or render-body architecture. Consumers can:
 
-- attach a first-person camera directly from `CharacterLook` and the configured eye height
+- attach a first-person camera from `CharacterLook` and the configured eye height
 - drive a third-person follow camera from `CharacterControllerState::orientation`
-- attach an animated mesh child that follows the logical controller entity
+- attach an animated mesh child that follows the logical controller
 - interpolate a separate visual proxy if they want stricter fixed-step presentation
-
-Examples in this crate show both first-person and third-person wiring without changing the controller runtime itself.
-
-## Grounding Model
-
-Grounding is shape-based rather than ray-only.
-
-The active collider profile is the standing or crouched capsule from `CharacterColliderCache`. Ground classification uses:
-
-- a downward shape cast from the active body
-- walkability derived from `min_walk_angle`
-- optional `MovementSurface::slide_only` override
-- post-move snap logic for downhill stability
-- step-up and step-down probes for natural stairs and curb handling
-
-`CharacterControllerState::ground` stores the last accepted contact, including:
-
-- entity
-- point
-- normal
-- distance
-- walkable classification
 
 ## Moving Platforms
 
-Support-body handling is a first-class part of the runtime:
+Support-body handling remains a first-class part of the runtime:
 
-- the current support entity is derived from the accepted ground hit
-- support velocity is computed from the platform's linear and angular velocity at the contact point
-- support angular velocity is exposed separately in runtime state for live inspection and downstream hooks
-- `MovementSurface::conveyor_velocity` is added on top
+- accepted ground hits define the current support entity
+- support velocity is computed from the platform's linear and angular motion at the contact point
+- `MovementSurface::conveyor_velocity` layers on top
 - `SupportVelocityPolicy` selects full, horizontal-only, or no inheritance
-- `SupportRotationPolicy` selects whether the controller inherits yaw from rotating supports
-- a detach grace window preserves momentum briefly after leaving the platform
+- `SupportRotationPolicy` selects whether yaw from rotating supports is inherited
+- `support_detach_grace` preserves momentum briefly after leaving the platform
 
-Per-surface override is supported through `MovementSurface::inherit_velocity_policy` and `MovementSurface::inherit_rotation_policy`.
-
-## Ability Layering
-
-The controller stays extensible by keeping optional features in their own components:
-
-- `CharacterFlying` enables debug-spectator or jetpack-style free flight without changing the grounded movement configuration
-- `CharacterSwimming` enables swim-mode acceleration, gravity, and ascend input
-- `CharacterMantle` enables buffered ledge traversal attempts
-- `CharacterWallKick` enables wall-based jump redirects
-- `CharacterDash` enables a configurable dash ability with cooldown, air dash budget, and optional gravity cancel
-- `CharacterGravity` overrides the default gravity magnitude and direction per entity
-- `CharacterPush` enables contact-driven rigidbody impulses
-- `ExternalMotion` provides a generic velocity-delta channel for gameplay code
-
-Environment volumes (`WaterVolume`, `EnvironmentVolume`) feed into the `EnvironmentModifiers` component, which is separate from `CharacterControllerState`. This decoupling means environment detection can evolve independently and consumers can query environment state without pulling in the full controller state.
-
-This pattern keeps the public API configuration-driven instead of accumulating a single monolithic movement struct.
+Per-surface overrides are supported through `MovementSurface::inherit_velocity_policy` and `MovementSurface::inherit_rotation_policy`.

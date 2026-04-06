@@ -11,23 +11,22 @@
 use std::time::Duration;
 
 use bevy::prelude::*;
-use bevy_enhanced_input::prelude::*;
-use saddle_character_controller::{
-    AscendAction, CharacterController, CharacterControllerDebugDraw,
-    CharacterControllerPlugin, CharacterControllerSystems, CharacterFlying, CharacterLook,
-    CharacterMantle, CharacterPush, CharacterWallKick, CrouchAction, JumpAction, LookAction,
-    MoveAction, MovementSurface, SprintAction, SupportVelocityPolicy, TraverseAction,
-};
-use saddle_character_controller_example_common as common;
 use common::{
-    DemoFixedSystems, DemoPlayer, FirstPersonCamera, MovingPlatform, animate_platforms,
-    follow_first_person_camera, spawn_flat_ground, spawn_lighting, spawn_platform, spawn_ramp,
+    DemoFixedSystems, DemoPlayer, FirstPersonCamera, MovingPlatform, add_demo_controller_plugins,
+    animate_platforms, default_character_actions, follow_first_person_camera,
+    spawn_demo_instructions, spawn_flat_ground, spawn_lighting, spawn_platform, spawn_ramp,
     spawn_stairs,
 };
+use saddle_character_controller::{
+    CharacterController, CharacterControllerDebugDraw, CharacterControllerSystems, CharacterFlying,
+    CharacterLook, CharacterMantle, CharacterPush, CharacterWallKick, MovementSurface,
+    SupportVelocityPolicy,
+};
+use saddle_character_controller_example_common as common;
 
 fn main() -> AppExit {
     let mut app = common::base_app("character_controller advanced_movement");
-    app.add_plugins(CharacterControllerPlugin::always_on(FixedUpdate));
+    add_demo_controller_plugins(&mut app);
 
     // Enable debug draw so the player can see grounding rays, step detection, etc.
     app.insert_resource(CharacterControllerDebugDraw {
@@ -56,44 +55,85 @@ fn setup_scene(
 ) {
     spawn_lighting(&mut commands);
     spawn_flat_ground(&mut commands, &mut meshes, &mut materials, 140.0);
+    spawn_demo_instructions(
+        &mut commands,
+        "Advanced Movement",
+        &[
+            "Use the surf walls, moving platforms, and traversal course while tuning air acceleration and jump height in the pane.",
+        ],
+    );
 
     // -- Slopes & stairs section (shared with slopes_and_stairs) ------------
     spawn_ramp(
-        &mut commands, &mut meshes, &mut materials,
-        "Walkable Ramp", Vec3::new(-6.0, 1.2, 0.0), Vec3::new(8.0, 0.8, 8.0),
-        -0.4, Color::srgb(0.23, 0.49, 0.41), None,
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        "Walkable Ramp",
+        Vec3::new(-6.0, 1.2, 0.0),
+        Vec3::new(8.0, 0.8, 8.0),
+        -0.4,
+        Color::srgb(0.23, 0.49, 0.41),
+        None,
     );
     spawn_ramp(
-        &mut commands, &mut meshes, &mut materials,
-        "Steep Ramp", Vec3::new(9.0, 1.2, 0.0), Vec3::new(8.0, 0.8, 8.0),
-        -1.0, Color::srgb(0.63, 0.28, 0.24),
-        Some(MovementSurface { slide_only: true, ..default() }),
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        "Steep Ramp",
+        Vec3::new(9.0, 1.2, 0.0),
+        Vec3::new(8.0, 0.8, 8.0),
+        -1.0,
+        Color::srgb(0.63, 0.28, 0.24),
+        Some(MovementSurface {
+            slide_only: true,
+            ..default()
+        }),
     );
     spawn_stairs(
-        &mut commands, &mut meshes, &mut materials,
-        Vec3::new(-18.0, 0.0, -5.0), 7, 1.2, 0.25, 2.0,
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        Vec3::new(-18.0, 0.0, -5.0),
+        7,
+        1.2,
+        0.25,
+        2.0,
     );
 
     // -- Moving platforms section -------------------------------------------
     spawn_platform(
-        &mut commands, &mut meshes, &mut materials,
-        "Platform A", Vec3::new(-8.0, 1.0, 0.0), Vec3::new(3.5, 0.35, 3.5),
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        "Platform A",
+        Vec3::new(-8.0, 1.0, 0.0),
+        Vec3::new(3.5, 0.35, 3.5),
         Color::srgb(0.82, 0.57, 0.2),
         Some(MovingPlatform {
             origin: Vec3::new(-8.0, 1.0, 0.0),
-            translation_axis: Vec3::X, translation_amplitude: 5.0,
-            translation_speed: 0.9, rotation_speed: 0.0, phase: 0.0,
+            translation_axis: Vec3::X,
+            translation_amplitude: 5.0,
+            translation_speed: 0.9,
+            rotation_speed: 0.0,
+            phase: 0.0,
         }),
         None,
     );
     spawn_platform(
-        &mut commands, &mut meshes, &mut materials,
-        "Platform B", Vec3::new(4.0, 2.2, -3.5), Vec3::new(3.0, 0.35, 3.0),
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        "Platform B",
+        Vec3::new(4.0, 2.2, -3.5),
+        Vec3::new(3.0, 0.35, 3.0),
         Color::srgb(0.31, 0.52, 0.84),
         Some(MovingPlatform {
             origin: Vec3::new(4.0, 2.2, -3.5),
-            translation_axis: Vec3::Z, translation_amplitude: 4.0,
-            translation_speed: 1.1, rotation_speed: 0.0, phase: 1.3,
+            translation_axis: Vec3::Z,
+            translation_amplitude: 4.0,
+            translation_speed: 1.1,
+            rotation_speed: 0.0,
+            phase: 1.3,
         }),
         Some(MovementSurface {
             inherit_velocity_policy: Some(SupportVelocityPolicy::Full),
@@ -101,8 +141,12 @@ fn setup_scene(
         }),
     );
     spawn_platform(
-        &mut commands, &mut meshes, &mut materials,
-        "Conveyor Strip", Vec3::new(16.0, 0.4, 0.0), Vec3::new(8.0, 0.2, 3.0),
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        "Conveyor Strip",
+        Vec3::new(16.0, 0.4, 0.0),
+        Vec3::new(8.0, 0.2, 3.0),
         Color::srgb(0.42, 0.37, 0.76),
         None,
         Some(MovementSurface {
@@ -116,10 +160,14 @@ fn setup_scene(
     // The player can gain speed by air-strafing along these walls — a classic "surf"
     // mechanic. `traction_multiplier` is set low so the controller cannot grip the wall.
     spawn_ramp(
-        &mut commands, &mut meshes, &mut materials,
+        &mut commands,
+        &mut meshes,
+        &mut materials,
         "Surf Wall Left",
-        Vec3::new(18.0, 2.2, -10.0), Vec3::new(14.0, 0.5, 10.0),
-        -1.1, Color::srgb(0.76, 0.36, 0.28),
+        Vec3::new(18.0, 2.2, -10.0),
+        Vec3::new(14.0, 0.5, 10.0),
+        -1.1,
+        Color::srgb(0.76, 0.36, 0.28),
         Some(MovementSurface {
             slide_only: true,
             traction_multiplier: 0.25,
@@ -127,10 +175,14 @@ fn setup_scene(
         }),
     );
     spawn_ramp(
-        &mut commands, &mut meshes, &mut materials,
+        &mut commands,
+        &mut meshes,
+        &mut materials,
         "Surf Wall Right",
-        Vec3::new(18.0, 2.2, 10.0), Vec3::new(14.0, 0.5, 10.0),
-        1.1, Color::srgb(0.28, 0.55, 0.74),
+        Vec3::new(18.0, 2.2, 10.0),
+        Vec3::new(14.0, 0.5, 10.0),
+        1.1,
+        Color::srgb(0.28, 0.55, 0.74),
         Some(MovementSurface {
             slide_only: true,
             traction_multiplier: 0.25,
@@ -160,27 +212,21 @@ fn setup_scene(
         ..default()
     };
 
-    let player = commands.spawn((
-        Name::new("Player"),
-        DemoPlayer,
-        controller,
-        look,
-        CharacterFlying::default(),
-        CharacterPush::default(),
-        CharacterMantle::default(),   // grab ledges and pull up
-        CharacterWallKick::default(), // kick off walls for extra height
-        Visibility::Inherited,
-        Transform::from_xyz(-20.0, 3.0, 6.0),
-        actions!(CharacterController[
-            (Action::<MoveAction>::new(), DeadZone::default(), Bindings::spawn((Cardinal::wasd_keys(), Axial::left_stick()))),
-            (Action::<LookAction>::new(), Bindings::spawn((Spawn((Binding::mouse_motion(), Scale::splat(0.0025))), Axial::right_stick().with((Scale::splat(0.06), DeadZone::default()))))),
-            (Action::<JumpAction>::new(), bindings![KeyCode::Space, GamepadButton::South]),
-            (Action::<SprintAction>::new(), bindings![KeyCode::ShiftLeft, GamepadButton::LeftTrigger2]),
-            (Action::<CrouchAction>::new(), bindings![KeyCode::ControlLeft, KeyCode::KeyC, GamepadButton::East]),
-            (Action::<AscendAction>::new(), bindings![KeyCode::KeyQ, GamepadButton::LeftTrigger]),
-            (Action::<TraverseAction>::new(), bindings![KeyCode::KeyE, GamepadButton::RightTrigger]),
-        ]),
-    )).id();
+    let player = commands
+        .spawn((
+            Name::new("Player"),
+            DemoPlayer,
+            controller,
+            look,
+            CharacterFlying::default(),
+            CharacterPush::default(),
+            CharacterMantle::default(),   // grab ledges and pull up
+            CharacterWallKick::default(), // kick off walls for extra height
+            Visibility::Inherited,
+            Transform::from_xyz(-20.0, 3.0, 6.0),
+            default_character_actions(),
+        ))
+        .id();
 
     commands.spawn((
         Name::new("First Person Camera"),

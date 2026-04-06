@@ -1,4 +1,3 @@
-use avian3d::prelude::Sensor;
 use bevy::prelude::*;
 
 #[derive(Reflect, Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,56 +37,6 @@ impl Default for MovementSurface {
             inherit_velocity_policy: None,
             inherit_rotation_policy: None,
             slide_only: false,
-        }
-    }
-}
-
-/// Generic environment volume that applies movement modifiers when the controller
-/// overlaps it. `WaterVolume` is the built-in convenience type; games can create
-/// custom volumes (lava, fog, quicksand) using the same pattern.
-///
-/// Attach to an entity with a `Sensor` collider. The built-in environment system
-/// will detect overlap and write the modifiers into [`EnvironmentModifiers`](crate::EnvironmentModifiers).
-#[derive(Component, Reflect, Debug, Clone)]
-#[reflect(Component, Debug)]
-#[require(Sensor, Transform, GlobalTransform)]
-pub struct EnvironmentVolume {
-    pub speed_multiplier: f32,
-    pub acceleration_multiplier: f32,
-    pub gravity_multiplier: f32,
-    /// If true, this volume can trigger swimming mode when `CharacterSwimming` is present.
-    pub swim_volume: bool,
-}
-
-impl Default for EnvironmentVolume {
-    fn default() -> Self {
-        Self {
-            speed_multiplier: 1.0,
-            acceleration_multiplier: 1.0,
-            gravity_multiplier: 1.0,
-            swim_volume: false,
-        }
-    }
-}
-
-/// Convenience constructor for water-type environment volumes.
-///
-/// A `WaterVolume` is an [`EnvironmentVolume`] with `swim_volume: true`.
-#[derive(Component, Reflect, Debug, Clone)]
-#[reflect(Component, Debug)]
-#[require(Sensor, Transform, GlobalTransform)]
-pub struct WaterVolume {
-    pub speed_multiplier: f32,
-    pub acceleration_multiplier: f32,
-    pub gravity_multiplier: f32,
-}
-
-impl Default for WaterVolume {
-    fn default() -> Self {
-        Self {
-            speed_multiplier: 1.0,
-            acceleration_multiplier: 1.0,
-            gravity_multiplier: 1.0,
         }
     }
 }
