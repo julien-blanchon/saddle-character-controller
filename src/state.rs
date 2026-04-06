@@ -4,12 +4,15 @@ use bevy::prelude::*;
 pub enum MovementMode {
     Grounded,
     Airborne,
-    Flying,
-    Swimming,
-    Dashing,
-    Mantling,
     Sliding,
     Custom(u8),
+}
+
+impl MovementMode {
+    pub const FLYING: Self = Self::Custom(1);
+    pub const SWIMMING: Self = Self::Custom(2);
+    pub const DASHING: Self = Self::Custom(3);
+    pub const MANTLING: Self = Self::Custom(4);
 }
 
 /// Readable runtime state published by the controller each tick.

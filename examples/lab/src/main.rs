@@ -7,7 +7,7 @@ use std::{fmt::Write as _, time::Duration};
 
 use avian3d::prelude::*;
 use bevy::{
-    input::common_conditions::input_just_pressed,
+    input::{common_conditions::input_just_pressed, mouse::AccumulatedMouseMotion},
     prelude::*,
     window::{CursorGrabMode, CursorOptions},
 };
@@ -18,15 +18,16 @@ use saddle_animation_ik::{
 };
 use saddle_character_controller::{
     AccumulatedInput, CharacterController, CharacterControllerPlugin, CharacterControllerState,
-    CharacterControllerSystems, CharacterFlying, CharacterLook, CharacterMantle,
+    CharacterControllerSystems, CharacterFlying, CharacterMantle,
     CharacterMotionStats, CharacterPush, CharacterWallKick, FlightCollisionMode, MovementSurface,
     SupportRotationPolicy, SupportVelocityPolicy,
     adapters::enhanced_input::{
-        AscendAction, CharacterControllerEnhancedInputPlugin, CrouchAction, JumpAction, LookAction,
+        AscendAction, CharacterControllerEnhancedInputPlugin, CrouchAction, JumpAction,
         MoveAction, SprintAction, TraverseAction,
     },
+    CharacterSwimming,
     convenience::environment::{
-        CharacterControllerEnvironmentPlugin, CharacterSwimming, SwimVolume,
+        CharacterControllerEnvironmentPlugin, SwimVolume,
     },
 };
 use saddle_character_state_machine::{
@@ -97,8 +98,6 @@ struct LabPane {
     jump_height: f32,
     #[pane(tab = "Movement", slider, min = 0.1, max = 1.2, step = 0.05)]
     step_size: f32,
-    #[pane(tab = "Movement", slider, min = 0.0005, max = 0.01, step = 0.0001)]
-    look_sensitivity: f32,
     #[pane(tab = "Movement")]
     inherit_support_yaw: bool,
     #[pane(tab = "Traversal")]
@@ -134,7 +133,6 @@ impl Default for LabPane {
             sprint_speed_scale: 1.5,
             jump_height: 1.8,
             step_size: 0.7,
-            look_sensitivity: 0.0023,
             inherit_support_yaw: true,
             flight_enabled: false,
             flight_speed: 14.0,
@@ -171,6 +169,7 @@ fn pane_plugins() -> (
 fn main() {
     let mut app = App::new();
     app.insert_resource(Time::<Fixed>::from_hz(60.0));
+    app.insert_resource(LabCursorLockState(true));
     app.init_resource::<LabDiagnostics>();
     app.init_resource::<LabPane>();
     app.register_type::<LabDiagnostics>();
@@ -195,7 +194,7 @@ fn main() {
         FixedUpdate,
         LabFixedSystems::AnimatePlatforms.before(CharacterControllerSystems::Grounding),
     );
-    app.add_systems(Startup, setup);
+    app.add_systems(Startup, (setup, capture_cursor));
     app.add_systems(
         FixedUpdate,
         animate_platforms.in_set(LabFixedSystems::AnimatePlatforms),
@@ -209,8 +208,14 @@ fn main() {
                 .chain()
                 .after(CharacterStateMachineSystems::ApplyAnimation)
                 .after(IkSystems::Apply),
-            capture_cursor.run_if(input_just_pressed(MouseButton::Left)),
-            release_cursor.run_if(input_just_pressed(KeyCode::Escape)),
+            (
+                capture_cursor
+                    .run_if(input_just_pressed(MouseButton::Left).and(no_ui_hovered)),
+                release_cursor.run_if(input_just_pressed(KeyCode::Escape)),
+                lab_mouse_look,
+                gate_look_on_cursor,
+            )
+                .chain(),
         ),
     );
     app.add_systems(PostUpdate, follow_camera);
@@ -408,10 +413,6 @@ fn spawn_controller(
                 jump_input_buffer: Duration::from_millis(170),
                 ..default()
             },
-            CharacterLook {
-                sensitivity: Vec2::splat(0.0023),
-                ..default()
-            },
             CharacterSwimming::default(),
             CharacterMantle::default(),
             CharacterWallKick::default(),
@@ -428,13 +429,6 @@ fn spawn_controller(
                     Action::<MoveAction>::new(),
                     DeadZone::default(),
                     Bindings::spawn((Cardinal::wasd_keys(), Axial::left_stick())),
-                ),
-                (
-                    Action::<LookAction>::new(),
-                    Bindings::spawn((
-                        Spawn((Binding::mouse_motion(), Scale::splat(0.0025))),
-                        Axial::right_stick().with((Scale::splat(0.06), DeadZone::default())),
-                    )),
                 ),
                 (Action::<JumpAction>::new(), bindings![KeyCode::Space, GamepadButton::South]),
                 (
@@ -843,7 +837,6 @@ fn sync_lab_pane(
     mut controller: Single<
         (
             &mut CharacterController,
-            &mut CharacterLook,
             &mut CharacterFlying,
             &CharacterControllerState,
             &CharacterMotionStats,
@@ -867,10 +860,9 @@ fn sync_lab_pane(
         } else {
             SupportRotationPolicy::None
         };
-        controller.1.sensitivity = Vec2::splat(pane.look_sensitivity);
-        controller.2.enabled = pane.flight_enabled;
-        controller.2.speed = pane.flight_speed;
-        controller.2.collision_mode = if pane.flight_noclip {
+        controller.1.enabled = pane.flight_enabled;
+        controller.1.speed = pane.flight_speed;
+        controller.1.collision_mode = if pane.flight_noclip {
             FlightCollisionMode::NoClip
         } else {
             FlightCollisionMode::Slide
@@ -880,7 +872,7 @@ fn sync_lab_pane(
     }
 
     let grounded_on = controller
-        .3
+        .2
         .ground
         .and_then(|ground| names.get(ground.entity).ok())
         .map_or_else(|| "none".to_owned(), |name| name.as_str().to_owned());
@@ -890,18 +882,17 @@ fn sync_lab_pane(
     pane.sprint_speed_scale = controller.0.sprint_speed_scale;
     pane.jump_height = controller.0.jump_height;
     pane.step_size = controller.0.step_size;
-    pane.look_sensitivity = controller.1.sensitivity.x;
     pane.inherit_support_yaw =
         controller.0.support_rotation_policy == SupportRotationPolicy::YawOnly;
-    pane.flight_enabled = controller.2.enabled;
-    pane.flight_speed = controller.2.speed;
-    pane.flight_noclip = controller.2.collision_mode == FlightCollisionMode::NoClip;
+    pane.flight_enabled = controller.1.enabled;
+    pane.flight_speed = controller.1.speed;
+    pane.flight_noclip = controller.1.collision_mode == FlightCollisionMode::NoClip;
     pane.look_distance = look_controller.0.reach_distance.unwrap_or(0.0);
     pane.look_weight = look_controller.0.weight.rotation;
-    pane.movement_mode = format!("{:?}", controller.3.movement_mode);
+    pane.movement_mode = format!("{:?}", controller.2.movement_mode);
     pane.grounded_on = grounded_on;
-    pane.current_speed = controller.4.current_speed;
-    pane.support_angular_speed = controller.3.support_angular_velocity.length();
+    pane.current_speed = controller.3.current_speed;
+    pane.support_angular_speed = controller.2.support_angular_velocity.length();
     pane.animation_state = animation
         .0
         .current_state
@@ -917,14 +908,59 @@ fn sync_lab_pane(
     pane.look_error = look_controller.1.last_error;
 }
 
-fn capture_cursor(mut cursor: Single<&mut CursorOptions>) {
+#[derive(Resource)]
+struct LabCursorLockState(bool);
+
+fn capture_cursor(mut cursor: Single<&mut CursorOptions>, mut state: ResMut<LabCursorLockState>) {
     cursor.grab_mode = CursorGrabMode::Locked;
     cursor.visible = false;
+    state.0 = true;
 }
 
-fn release_cursor(mut cursor: Single<&mut CursorOptions>) {
+fn release_cursor(mut cursor: Single<&mut CursorOptions>, mut state: ResMut<LabCursorLockState>) {
     cursor.grab_mode = CursorGrabMode::None;
     cursor.visible = true;
+    state.0 = false;
+}
+
+fn gate_look_on_cursor(
+    lock_state: Res<LabCursorLockState>,
+    mut players: Query<&mut CharacterControllerState, With<LabController>>,
+    mut saved: Local<Option<Quat>>,
+) {
+    let Ok(mut state) = players.single_mut() else {
+        return;
+    };
+    if lock_state.0 {
+        *saved = None;
+    } else if let Some(orientation) = *saved {
+        state.orientation = orientation;
+    } else {
+        *saved = Some(state.orientation);
+    }
+}
+
+fn no_ui_hovered(query: Query<&Interaction>) -> bool {
+    query.iter().all(|i| matches!(i, Interaction::None))
+}
+
+/// Applies mouse motion to the controller's orientation when the cursor is locked.
+fn lab_mouse_look(
+    lock_state: Res<LabCursorLockState>,
+    mouse: Res<AccumulatedMouseMotion>,
+    mut players: Query<&mut CharacterControllerState, With<LabController>>,
+) {
+    if !lock_state.0 {
+        return;
+    }
+    let Ok(mut state) = players.single_mut() else {
+        return;
+    };
+    let sensitivity = 0.0023;
+    let (yaw, pitch, _) = state.orientation.to_euler(EulerRot::YXZ);
+    let new_yaw = yaw - mouse.delta.x * sensitivity;
+    let new_pitch = (pitch - mouse.delta.y * sensitivity).clamp(-1.5, 1.5);
+    state.orientation = Quat::from_euler(EulerRot::YXZ, new_yaw, new_pitch, 0.0);
 }
 
 fn animate_platforms(

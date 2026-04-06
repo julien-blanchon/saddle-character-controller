@@ -5352,6 +5352,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "saddle-camera-fps-camera"
+version = "0.1.0"
+source = "git+https://github.com/julien-blanchon/saddle-camera-fps-camera#de05aa9b3b8ed5762a2a06ca102da4a33e6b2eaf"
+dependencies = [
+ "bevy",
+]
+
+[[package]]
 name = "saddle-character-controller"
 version = "0.1.0"
 dependencies = [
@@ -5392,6 +5400,7 @@ dependencies = [
  "bevy_flair",
  "bevy_input_focus",
  "bevy_ui_widgets",
+ "saddle-camera-fps-camera",
  "saddle-character-controller",
  "saddle-pane",
 ]

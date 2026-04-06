@@ -1,11 +1,16 @@
 use crate::{
-    CharacterController, CharacterControllerState, CharacterMantle, ExternalMotion,
-    components::{
-        CharacterColliderCache, CharacterControllerScratch, CharacterDash, CharacterFlying,
-        CharacterGravity, CharacterLook, CharacterMotionStats, CharacterPush, CharacterWallKick,
-        FlightCollisionMode, PendingLanding,
+    CharacterController, CharacterControllerState, ExternalMotion,
+    abilities::{
+        dash::CharacterDash,
+        flying::{CharacterFlying, FlightCollisionMode},
+        mantle::CharacterMantle,
+        swimming::CharacterSwimming,
+        wall_kick::CharacterWallKick,
     },
-    convenience::environment::CharacterSwimming,
+    components::{
+        CharacterColliderCache, CharacterControllerScratch, CharacterGravity, CharacterMotionStats,
+        CharacterPush, PendingLanding,
+    },
     helpers::{
         ages_recently, apply_ground_friction, clamp_velocity, classify_mode, expire_old,
         ground_probe_distance, horizontal, horizontal_speed, inherited_support_rotation,
@@ -109,9 +114,8 @@ type SupportBodyQuery<'w, 's> = Query<
     Without<CharacterController>,
 >;
 
-pub(crate) fn run_controllers(
+pub(crate) fn run_movement_prepare(
     mut controllers: ControllerQuery,
-    mut looks: Query<&mut CharacterLook, With<CharacterController>>,
     move_and_slide: MoveAndSlide,
     surfaces: Query<&MovementSurface>,
     support_colliders: SupportColliderQuery,
@@ -136,9 +140,9 @@ pub(crate) fn run_controllers(
         env,
         flying,
         mantle,
-        wall_kick,
+        _wall_kick,
         swimming,
-        (_push, external_motion, mut dash, gravity_override),
+        (_push, external_motion, mut dash, _gravity_override),
     ) in &mut controllers
     {
         // --- Controller mode gate ---
@@ -183,12 +187,12 @@ pub(crate) fn run_controllers(
                     state.mantle.is_some(),
                     state.dash.is_some(),
                 );
+                scratch.skip_execute = true;
                 continue;
             }
             ControllerMode::Enabled => { /* fall through to full simulation */ }
         }
 
-        let mut look = looks.get_mut(entity).ok();
         scratch.contacts.clear();
         scratch.pending_jump = false;
         scratch.pending_landing = None;
@@ -260,7 +264,6 @@ pub(crate) fn run_controllers(
                     &support_colliders,
                 ),
                 &mut state,
-                look.as_deref_mut(),
                 &mut transform,
                 dt,
             );
@@ -317,6 +320,49 @@ pub(crate) fn run_controllers(
         if state.mantle.is_some() && mantle.is_none() {
             state.mantle = None;
         }
+
+        scratch.computed_support_velocity = support_velocity;
+        scratch.pre_move_ground = pre_move_ground;
+        scratch.skip_execute = false;
+    }
+}
+
+pub(crate) fn run_movement_execute(
+    mut controllers: ControllerQuery,
+    move_and_slide: MoveAndSlide,
+    surfaces: Query<&MovementSurface>,
+    support_colliders: SupportColliderQuery,
+    time: Res<Time>,
+) {
+    let dt = safe_dt(time.delta_secs());
+    if dt == 0.0 {
+        return;
+    }
+
+    for (
+        entity,
+        controller,
+        mut state,
+        mut stats,
+        mut input,
+        mut linear_velocity,
+        mut transform,
+        cache,
+        mut scratch,
+        env,
+        flying,
+        mantle,
+        wall_kick,
+        swimming,
+        (_push, _external_motion, mut dash, gravity_override),
+    ) in &mut controllers
+    {
+        if scratch.skip_execute {
+            continue;
+        }
+
+        let support_velocity = scratch.computed_support_velocity;
+        let pre_move_ground = scratch.pre_move_ground;
 
         if let Some(mantle_state) = state.mantle {
             if let Some(mantle_config) = mantle {
@@ -525,6 +571,43 @@ pub(crate) fn run_controllers(
                 linear_velocity.y = linear_velocity.y.max(-controller.terminal_velocity);
                 let _ = pre_jump_vertical_speed;
             }
+        }
+    }
+}
+
+pub(crate) fn run_movement_finalize(
+    mut controllers: ControllerQuery,
+    move_and_slide: MoveAndSlide,
+    surfaces: Query<&MovementSurface>,
+    support_colliders: SupportColliderQuery,
+    support_bodies: SupportBodyQuery,
+    time: Res<Time>,
+) {
+    let dt = safe_dt(time.delta_secs());
+    if dt == 0.0 {
+        return;
+    }
+
+    for (
+        entity,
+        controller,
+        mut state,
+        mut stats,
+        _input,
+        mut linear_velocity,
+        mut transform,
+        cache,
+        mut scratch,
+        env,
+        flying,
+        _mantle,
+        _wall_kick,
+        swimming,
+        (_push, _external_motion, mut dash, _gravity_override),
+    ) in &mut controllers
+    {
+        if scratch.skip_execute {
+            continue;
         }
 
         let mut post_ground = if flying.is_some_and(|flight| flight.enabled) {
@@ -915,7 +998,6 @@ fn calculate_support_motion(
 fn apply_support_rotation(
     policy: SupportRotationPolicy,
     state: &mut CharacterControllerState,
-    look: Option<&mut CharacterLook>,
     transform: &mut Transform,
     dt: f32,
 ) {
@@ -925,17 +1007,7 @@ fn apply_support_rotation(
     }
 
     let delta = Quat::from_scaled_axis(inherited * dt);
-    if let Some(look) = look {
-        match policy {
-            SupportRotationPolicy::None => {}
-            SupportRotationPolicy::YawOnly => {
-                look.yaw += inherited.y * dt;
-                state.orientation = look.orientation();
-            }
-        }
-    } else {
-        state.orientation = (delta * state.orientation).normalize();
-    }
+    state.orientation = (delta * state.orientation).normalize();
 
     if policy != SupportRotationPolicy::None {
         transform.rotation = state.orientation;

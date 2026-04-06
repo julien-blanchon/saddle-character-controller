@@ -15,7 +15,7 @@ use common::{
     default_character_actions, spawn_block, spawn_controller_visual, spawn_demo_instructions,
     spawn_flat_ground, spawn_lighting,
 };
-use saddle_character_controller::{CharacterController, CharacterControllerSystems, CharacterLook};
+use saddle_character_controller::{CharacterController, CharacterControllerSystems};
 use saddle_character_controller_example_common as common;
 
 const BOT_COUNT: usize = 49; // plus 1 player = 50 total
@@ -73,17 +73,11 @@ fn setup_scene(
         coyote_time: Duration::from_millis(110),
         ..default()
     };
-    let look = CharacterLook {
-        sensitivity: Vec2::splat(0.0022),
-        ..default()
-    };
-
     let player = commands
         .spawn((
             Name::new("Player"),
             DemoPlayer,
             controller,
-            look,
             // No CharacterPush — disabled in stress test to reduce pair-wise interactions.
             Visibility::Inherited,
             Transform::from_xyz(0.0, 3.0, 16.0),

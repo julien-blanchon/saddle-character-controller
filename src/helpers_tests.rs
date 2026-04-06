@@ -157,6 +157,6 @@ fn flying_mode_takes_priority_over_ground_and_water() {
             false,
             false
         ),
-        crate::MovementMode::Flying
+        crate::MovementMode::FLYING
     );
 }

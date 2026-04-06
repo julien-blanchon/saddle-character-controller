@@ -11,12 +11,12 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use common::{
-    DemoFixedSystems, DemoPlayer, FirstPersonCamera, MovingPlatform, add_demo_controller_plugins,
-    animate_platforms, default_character_actions, follow_first_person_camera,
-    spawn_demo_instructions, spawn_flat_ground, spawn_lighting, spawn_platform,
+    DemoFixedSystems, DemoPlayer, MovingPlatform, add_demo_controller_plugins, animate_platforms,
+    default_character_actions, spawn_demo_instructions, spawn_flat_ground, spawn_fps_camera,
+    spawn_lighting, spawn_platform,
 };
 use saddle_character_controller::{
-    CharacterController, CharacterControllerSystems, CharacterFlying, CharacterLook, CharacterPush,
+    CharacterController, CharacterControllerSystems, CharacterFlying, CharacterPush,
     MovementSurface, SupportVelocityPolicy,
 };
 use saddle_character_controller_example_common as common;
@@ -35,8 +35,7 @@ fn main() -> AppExit {
     .add_systems(
         FixedUpdate,
         animate_platforms.in_set(DemoFixedSystems::AnimatePlatforms),
-    )
-    .add_systems(PostUpdate, follow_first_person_camera);
+    );
 
     app.run()
 }
@@ -132,32 +131,18 @@ fn setup_scene(
         support_detach_grace: Duration::from_millis(180),
         ..default()
     };
-    let look = CharacterLook {
-        sensitivity: Vec2::splat(0.0022),
-        ..default()
-    };
-
-    let player = commands
-        .spawn((
-            Name::new("Player"),
-            DemoPlayer,
-            controller,
-            look,
-            CharacterFlying::default(),
-            CharacterPush::default(),
-            Visibility::Inherited,
-            Transform::from_xyz(-16.0, 3.0, 0.0),
-            default_character_actions(),
-        ))
-        .id();
+    let player_transform = Transform::from_xyz(-16.0, 3.0, 0.0);
 
     commands.spawn((
-        Name::new("First Person Camera"),
-        Camera3d::default(),
-        Projection::Perspective(PerspectiveProjection {
-            fov: std::f32::consts::TAU / 5.5,
-            ..default()
-        }),
-        FirstPersonCamera { target: player },
+        Name::new("Player"),
+        DemoPlayer,
+        controller,
+        CharacterFlying::default(),
+        CharacterPush::default(),
+        Visibility::Inherited,
+        player_transform,
+        default_character_actions(),
     ));
+
+    spawn_fps_camera(&mut commands, &player_transform);
 }

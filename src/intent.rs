@@ -4,7 +4,6 @@ use bevy::prelude::*;
 #[reflect(Component, Debug)]
 pub struct AccumulatedInput {
     pub move_axis: Vec2,
-    pub look_axis: Vec2,
     pub jump_pressed_for: Option<f32>,
     pub jump_held: bool,
     pub traverse_pressed_for: Option<f32>,
@@ -17,10 +16,6 @@ pub struct AccumulatedInput {
 impl AccumulatedInput {
     pub fn set_move_axis(&mut self, move_axis: Vec2) {
         self.move_axis = move_axis;
-    }
-
-    pub fn set_look_axis(&mut self, look_axis: Vec2) {
-        self.look_axis = look_axis;
     }
 
     pub fn press_jump(&mut self) {

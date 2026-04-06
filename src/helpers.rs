@@ -152,13 +152,13 @@ pub(crate) fn classify_mode(
     dash_active: bool,
 ) -> crate::MovementMode {
     if dash_active {
-        crate::MovementMode::Dashing
+        crate::MovementMode::DASHING
     } else if mantle_active {
-        crate::MovementMode::Mantling
+        crate::MovementMode::MANTLING
     } else if can_fly {
-        crate::MovementMode::Flying
+        crate::MovementMode::FLYING
     } else if can_swim && env_depth > crate::EnvironmentDepth::Shallow {
-        crate::MovementMode::Swimming
+        crate::MovementMode::SWIMMING
     } else if let Some(ground) = ground {
         if ground.walkable {
             crate::MovementMode::Grounded

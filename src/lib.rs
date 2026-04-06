@@ -1,3 +1,4 @@
+pub mod abilities;
 #[cfg(feature = "enhanced-input")]
 pub mod adapters;
 pub mod convenience;
@@ -10,10 +11,14 @@ mod state;
 mod surfaces;
 mod systems;
 
+pub use abilities::dash::CharacterDash;
+pub use abilities::flying::{CharacterFlying, FlightCollisionMode};
+pub use abilities::mantle::CharacterMantle;
+pub use abilities::swimming::CharacterSwimming;
+pub use abilities::wall_kick::CharacterWallKick;
 pub use components::{
-    CharacterController, CharacterDash, CharacterFlying, CharacterGravity, CharacterLook,
-    CharacterMantle, CharacterMotionStats, CharacterPush, CharacterWallKick, ExternalMotion,
-    FlightCollisionMode,
+    CharacterController, CharacterGravity, CharacterMotionStats, CharacterPush, ExternalMotion,
+    MovementOverride,
 };
 pub use intent::AccumulatedInput;
 pub use messages::{CharacterJumped, CharacterLanded, MovementModeChanged, SupportBodyChanged};
@@ -36,7 +41,12 @@ pub enum CharacterControllerSystems {
     ReadInput,
     PreMovement,
     Grounding,
-    Movement,
+    /// Core frame setup: depenetrate, ground probe, support, crouch, input buffers.
+    MovementPrepare,
+    /// Actual velocity/position changes. Ability plugins and core movement run here.
+    MovementExecute,
+    /// Core frame teardown: post-ground probe, snap, stats, mode classify.
+    MovementFinalize,
     PostMovement,
     Presentation,
 }
@@ -79,23 +89,16 @@ impl Plugin for CharacterControllerPlugin {
             .register_type::<AccumulatedInput>()
             .register_type::<CharacterController>()
             .register_type::<CharacterControllerState>()
-            .register_type::<CharacterDash>()
-            .register_type::<CharacterFlying>()
             .register_type::<CharacterGravity>()
-            .register_type::<CharacterLook>()
-            .register_type::<CharacterMantle>()
             .register_type::<CharacterMotionStats>()
             .register_type::<CharacterPush>()
-            .register_type::<CharacterWallKick>()
             .register_type::<ControllerMode>()
-            .register_type::<DashState>()
             .register_type::<EnvironmentDepth>()
             .register_type::<EnvironmentModifiers>()
             .register_type::<ExternalMotion>()
-            .register_type::<FlightCollisionMode>()
             .register_type::<GroundContact>()
-            .register_type::<MantleState>()
             .register_type::<MovementMode>()
+            .register_type::<MovementOverride>()
             .register_type::<CharacterControllerDebugDraw>()
             .register_type::<MovementSurface>()
             .register_type::<SupportRotationPolicy>()
@@ -114,7 +117,9 @@ impl Plugin for CharacterControllerPlugin {
                     CharacterControllerSystems::ReadInput,
                     CharacterControllerSystems::PreMovement,
                     CharacterControllerSystems::Grounding,
-                    CharacterControllerSystems::Movement,
+                    CharacterControllerSystems::MovementPrepare,
+                    CharacterControllerSystems::MovementExecute,
+                    CharacterControllerSystems::MovementFinalize,
                     CharacterControllerSystems::PostMovement,
                     CharacterControllerSystems::Presentation,
                 )
@@ -128,15 +133,18 @@ impl Plugin for CharacterControllerPlugin {
                         .in_set(CharacterControllerSystems::PreMovement),
                     systems::prepare::refresh_character_shapes
                         .in_set(CharacterControllerSystems::PreMovement),
-                    systems::movement::run_controllers.in_set(CharacterControllerSystems::Movement),
+                    systems::movement::run_movement_prepare
+                        .in_set(CharacterControllerSystems::MovementPrepare),
+                    systems::movement::run_movement_execute
+                        .in_set(CharacterControllerSystems::MovementExecute),
+                    systems::movement::run_movement_finalize
+                        .in_set(CharacterControllerSystems::MovementFinalize),
                     systems::finalize::apply_push_forces
                         .in_set(CharacterControllerSystems::PostMovement),
                     systems::finalize::sync_active_collider
                         .in_set(CharacterControllerSystems::PostMovement),
                     systems::finalize::emit_controller_messages
                         .in_set(CharacterControllerSystems::PostMovement),
-                    systems::finalize::clear_per_tick_input
-                        .in_set(CharacterControllerSystems::Presentation),
                 )
                     .run_if(systems::activation::runtime_is_active),
             )

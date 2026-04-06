@@ -9,16 +9,16 @@
 
 use std::time::Duration;
 
-use bevy::prelude::*;
+use bevy::{input::mouse::AccumulatedMouseMotion, prelude::*};
 use common::{
-    DemoFixedSystems, DemoPlayer, ThirdPersonCamera, add_demo_controller_plugins,
+    CursorLockState, DemoFixedSystems, DemoPlayer, ThirdPersonCamera, add_demo_controller_plugins,
     animate_platforms, default_character_actions, follow_third_person_camera, spawn_block,
     spawn_controller_visual, spawn_demo_instructions, spawn_flat_ground, spawn_lighting,
     spawn_platform, spawn_stairs,
 };
 use saddle_character_controller::{
-    CharacterController, CharacterControllerSystems, CharacterFlying, CharacterLook,
-    CharacterMantle, CharacterPush, convenience::environment::CharacterSwimming,
+    CharacterController, CharacterControllerState, CharacterControllerSystems, CharacterFlying,
+    CharacterMantle, CharacterPush, CharacterSwimming,
 };
 use saddle_character_controller_example_common as common;
 
@@ -35,9 +35,29 @@ fn main() -> AppExit {
         FixedUpdate,
         animate_platforms.in_set(DemoFixedSystems::AnimatePlatforms),
     )
+    .add_systems(Update, third_person_mouse_look)
     .add_systems(PostUpdate, follow_third_person_camera);
 
     app.run()
+}
+
+/// Applies mouse motion to the controller's orientation when the cursor is locked.
+fn third_person_mouse_look(
+    lock_state: Res<CursorLockState>,
+    mouse: Res<AccumulatedMouseMotion>,
+    mut players: Query<&mut CharacterControllerState, With<DemoPlayer>>,
+) {
+    if !lock_state.0 {
+        return;
+    }
+    let Ok(mut state) = players.single_mut() else {
+        return;
+    };
+    let sensitivity = 0.0022;
+    let (yaw, pitch, _) = state.orientation.to_euler(EulerRot::YXZ);
+    let new_yaw = yaw - mouse.delta.x * sensitivity;
+    let new_pitch = (pitch - mouse.delta.y * sensitivity).clamp(-1.5, 1.5);
+    state.orientation = Quat::from_euler(EulerRot::YXZ, new_yaw, new_pitch, 0.0);
 }
 
 fn setup_scene(
@@ -133,17 +153,11 @@ fn setup_scene(
         coyote_time: Duration::from_millis(110),
         ..default()
     };
-    let look = CharacterLook {
-        sensitivity: Vec2::splat(0.0022),
-        ..default()
-    };
-
     let player = commands
         .spawn((
             Name::new("Player"),
             DemoPlayer,
             controller,
-            look,
             CharacterFlying::default(),
             CharacterPush::default(),
             CharacterSwimming::default(),

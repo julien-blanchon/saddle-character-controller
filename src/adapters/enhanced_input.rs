@@ -1,4 +1,4 @@
-use crate::{AccumulatedInput, CharacterController, CharacterControllerState, CharacterLook};
+use crate::{AccumulatedInput, CharacterController};
 use bevy::prelude::*;
 use bevy_enhanced_input::context::InputContextAppExt;
 use bevy_enhanced_input::prelude::{
@@ -8,10 +8,6 @@ use bevy_enhanced_input::prelude::{
 #[derive(Debug, InputAction)]
 #[action_output(Vec2)]
 pub struct MoveAction;
-
-#[derive(Debug, InputAction)]
-#[action_output(Vec2)]
-pub struct LookAction;
 
 #[derive(Debug, InputAction)]
 #[action_output(bool)]
@@ -62,10 +58,7 @@ impl Plugin for CharacterControllerEnhancedInputPlugin {
             .add_observer(clear_crouch_active_on_complete)
             .add_observer(cache_ascend_active)
             .add_observer(clear_ascend_active_on_cancel)
-            .add_observer(clear_ascend_active_on_complete)
-            .add_observer(apply_look_axis)
-            .add_observer(clear_look_axis_on_cancel)
-            .add_observer(clear_look_axis_on_complete);
+            .add_observer(clear_ascend_active_on_complete);
     }
 }
 
@@ -222,44 +215,3 @@ pub(crate) fn clear_ascend_active_on_complete(
     }
 }
 
-pub(crate) fn apply_look_axis(
-    trigger: On<Fire<LookAction>>,
-    mut query: Query<
-        (
-            &mut AccumulatedInput,
-            Option<&mut CharacterLook>,
-            &mut CharacterControllerState,
-        ),
-        With<CharacterController>,
-    >,
-) {
-    let Ok((mut input, look, mut state)) = query.get_mut(trigger.context) else {
-        return;
-    };
-    input.set_look_axis(trigger.value);
-    let Some(mut look) = look else {
-        return;
-    };
-    let scaled = trigger.value * look.sensitivity;
-    look.yaw -= scaled.x;
-    look.pitch = (look.pitch - scaled.y).clamp(look.min_pitch, look.max_pitch);
-    state.orientation = look.orientation();
-}
-
-pub(crate) fn clear_look_axis_on_cancel(
-    trigger: On<InputCancel<LookAction>>,
-    mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
-) {
-    if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.set_look_axis(Vec2::ZERO);
-    }
-}
-
-pub(crate) fn clear_look_axis_on_complete(
-    trigger: On<Complete<LookAction>>,
-    mut query: Query<&mut AccumulatedInput, With<CharacterController>>,
-) {
-    if let Ok(mut input) = query.get_mut(trigger.context) {
-        input.set_look_axis(Vec2::ZERO);
-    }
-}

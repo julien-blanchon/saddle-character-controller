@@ -2,8 +2,8 @@ use avian3d::prelude::*;
 use bevy::{ecs::entity::EntityHashSet, prelude::*};
 
 use crate::{
-    CharacterController, CharacterControllerState,
-    convenience::environment::{CharacterSwimming, SwimVolume},
+    CharacterController, CharacterControllerState, CharacterSwimming,
+    convenience::environment::SwimVolume,
     state::{EnvironmentDepth, EnvironmentModifiers},
 };
 

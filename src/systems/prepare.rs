@@ -1,5 +1,5 @@
 use crate::{
-    CharacterController, CharacterControllerState, CharacterLook,
+    CharacterController, CharacterControllerState,
     components::{CharacterColliderCache, CharacterControllerScratch, refresh_collider_cache},
 };
 use avian3d::prelude::*;
@@ -30,18 +30,15 @@ pub(crate) fn setup_new_controllers(
             &mut CharacterColliderCache,
             &mut CharacterControllerScratch,
             &Transform,
-            Option<&CharacterLook>,
         ),
         Added<CharacterController>,
     >,
 ) {
-    for (entity, mut controller, mut state, mut cache, mut scratch, transform, look) in &mut query {
+    for (entity, mut controller, mut state, mut cache, mut scratch, transform) in &mut query {
         controller.filter.excluded_entities.insert(entity);
         refresh_collider_cache(&mut cache, &controller);
         scratch.move_config.skin_width = controller.skin_width;
-        state.orientation = look
-            .map(CharacterLook::orientation)
-            .unwrap_or(transform.rotation);
+        state.orientation = transform.rotation;
     }
 }
 

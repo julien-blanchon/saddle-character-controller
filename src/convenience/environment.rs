@@ -1,5 +1,6 @@
 use crate::{
     CharacterController, CharacterControllerSystems,
+    abilities::swimming::CharacterSwimming,
     state::{EnvironmentDepth, EnvironmentModifiers},
     systems::activation,
 };
@@ -8,26 +9,6 @@ use bevy::{
     ecs::{intern::Interned, schedule::ScheduleLabel},
     prelude::*,
 };
-
-#[derive(Component, Reflect, Debug, Clone)]
-#[reflect(Component, Debug)]
-pub struct CharacterSwimming {
-    pub acceleration_hz: f32,
-    pub gravity: f32,
-    pub slowdown: f32,
-    pub ascent_speed_scale: f32,
-}
-
-impl Default for CharacterSwimming {
-    fn default() -> Self {
-        Self {
-            acceleration_hz: 6.0,
-            gravity: 2.4,
-            slowdown: 0.6,
-            ascent_speed_scale: 1.0,
-        }
-    }
-}
 
 /// Generic environment volume that applies movement modifiers when the controller overlaps it.
 #[derive(Component, Reflect, Debug, Clone)]
@@ -83,8 +64,7 @@ impl CharacterControllerEnvironmentPlugin {
 
 impl Plugin for CharacterControllerEnvironmentPlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<CharacterSwimming>()
-            .register_type::<EnvironmentVolume>()
+        app.register_type::<EnvironmentVolume>()
             .register_type::<SwimVolume>()
             .add_systems(
                 self.update_schedule,

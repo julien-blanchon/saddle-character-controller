@@ -1,7 +1,7 @@
 use crate::{
     AccumulatedInput, CharacterController, CharacterControllerPlugin, CharacterControllerState,
-    CharacterControllerSystems, CharacterJumped, CharacterLanded, CharacterLook,
-    CharacterMotionStats, MovementMode, MovementModeChanged, SupportBodyChanged,
+    CharacterControllerSystems, CharacterJumped, CharacterLanded, CharacterMotionStats,
+    MovementMode, MovementModeChanged, SupportBodyChanged,
     components::{CharacterControllerScratch, PendingLanding},
     systems::{activation::CharacterControllerRuntime, finalize, prepare},
 };
@@ -50,12 +50,12 @@ fn plugin_builds_with_custom_schedule_labels_and_ordering_points() {
         ))
         .configure_sets(
             SimulationSchedule,
-            CharacterControllerSystems::Movement.before(AfterControllerMovement),
+            CharacterControllerSystems::MovementExecute.before(AfterControllerMovement),
         )
         .add_systems(
             SimulationSchedule,
             (
-                push_movement_marker.in_set(CharacterControllerSystems::Movement),
+                push_movement_marker.in_set(CharacterControllerSystems::MovementExecute),
                 push_after_marker.in_set(AfterControllerMovement),
             ),
         );
@@ -103,17 +103,12 @@ fn prepare_system_initializes_filter_and_orientation() {
     app.add_plugins(MinimalPlugins)
         .add_systems(Update, prepare::setup_new_controllers);
 
-    let look = CharacterLook {
-        yaw: 0.8,
-        pitch: -0.35,
-        ..default()
-    };
+    let rotation = Quat::from_euler(EulerRot::YXZ, 0.8, -0.35, 0.0);
     let entity = app
         .world_mut()
         .spawn((
             CharacterController::default(),
-            look.clone(),
-            Transform::from_xyz(0.0, 1.0, 2.0),
+            Transform::from_xyz(0.0, 1.0, 2.0).with_rotation(rotation),
         ))
         .id();
 
@@ -121,10 +116,9 @@ fn prepare_system_initializes_filter_and_orientation() {
 
     let controller = app.world().get::<CharacterController>(entity).unwrap();
     let state = app.world().get::<CharacterControllerState>(entity).unwrap();
-    let expected = look.orientation();
 
     assert!(controller.filter.excluded_entities.contains(&entity));
-    assert!(state.orientation.dot(expected).abs() > 0.999_999);
+    assert!(state.orientation.dot(rotation).abs() > 0.999_999);
 }
 
 #[test]

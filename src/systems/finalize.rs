@@ -1,6 +1,6 @@
 use crate::{
     CharacterControllerState, CharacterJumped, CharacterLanded, CharacterMotionStats,
-    MovementModeChanged, SupportBodyChanged, components::PendingLanding, intent::AccumulatedInput,
+    MovementModeChanged, SupportBodyChanged, components::PendingLanding,
 };
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -71,12 +71,6 @@ pub(crate) fn emit_controller_messages(
                 current,
             });
         }
-    }
-}
-
-pub(crate) fn clear_per_tick_input(mut query: Query<&mut AccumulatedInput>) {
-    for mut input in &mut query {
-        input.look_axis = Vec2::ZERO;
     }
 }
 

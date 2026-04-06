@@ -24,6 +24,7 @@ const DEFAULT_CROUCH_HEIGHT: f32 = 1.3;
     CharacterMotionStats,
     CharacterColliderCache,
     CharacterControllerScratch,
+    MovementOverride,
     Collider = Collider::capsule(DEFAULT_CAPSULE_RADIUS, 2.0 * DEFAULT_CAPSULE_HALF_HEIGHT - 2.0 * DEFAULT_CAPSULE_RADIUS),
     CollidingEntities,
     CustomPositionIntegration,
@@ -124,123 +125,6 @@ impl Default for CharacterController {
     }
 }
 
-#[derive(Reflect, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FlightCollisionMode {
-    Slide,
-    NoClip,
-}
-
-#[derive(Component, Reflect, Debug, Clone)]
-#[reflect(Component, Debug)]
-pub struct CharacterFlying {
-    pub enabled: bool,
-    pub speed: f32,
-    pub sprint_speed_scale: f32,
-    pub acceleration_hz: f32,
-    pub drag_hz: f32,
-    pub vertical_speed_scale: f32,
-    pub collision_mode: FlightCollisionMode,
-}
-
-impl Default for CharacterFlying {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            speed: 14.0,
-            sprint_speed_scale: 1.4,
-            acceleration_hz: 8.0,
-            drag_hz: 6.0,
-            vertical_speed_scale: 1.0,
-            collision_mode: FlightCollisionMode::Slide,
-        }
-    }
-}
-
-#[derive(Component, Reflect, Debug, Clone)]
-#[reflect(Component, Debug)]
-pub struct CharacterMantle {
-    pub max_height: f32,
-    pub max_distance: f32,
-    pub min_wall_angle: f32,
-    pub speed: f32,
-    pub pull_up_height: f32,
-    pub input_buffer: Duration,
-}
-
-impl Default for CharacterMantle {
-    fn default() -> Self {
-        Self {
-            max_height: 1.0,
-            max_distance: 0.3,
-            min_wall_angle: 50.0_f32.to_radians(),
-            speed: 5.0,
-            pull_up_height: 0.3,
-            input_buffer: Duration::from_millis(60),
-        }
-    }
-}
-
-#[derive(Component, Reflect, Debug, Clone)]
-#[reflect(Component, Debug)]
-pub struct CharacterWallKick {
-    pub power: f32,
-    pub upward_factor: f32,
-    pub distance: f32,
-    pub input_buffer: Duration,
-    pub cooldown: Duration,
-    pub max_wall_angle: f32,
-}
-
-impl Default for CharacterWallKick {
-    fn default() -> Self {
-        Self {
-            power: 0.9,
-            upward_factor: 1.0,
-            distance: 0.4,
-            input_buffer: Duration::from_millis(150),
-            cooldown: Duration::from_millis(300),
-            max_wall_angle: 40.0_f32.to_radians(),
-        }
-    }
-}
-
-/// Optional dash ability. Attach to a controller entity to enable dashing.
-///
-/// When triggered by your input adapter, the controller enters a direction-locked,
-/// gravity-free burst of movement for the configured duration.
-#[derive(Component, Reflect, Debug, Clone)]
-#[reflect(Component, Debug)]
-pub struct CharacterDash {
-    /// Dash speed in units per second.
-    pub speed: f32,
-    /// Total dash duration.
-    pub duration: Duration,
-    /// Cooldown between dashes.
-    pub cooldown: Duration,
-    /// If true, gravity is cancelled during the dash.
-    pub cancel_gravity: bool,
-    /// Maximum air dashes before needing to land (0 = unlimited).
-    pub max_air_dashes: u32,
-    /// Time since last dash ended. Managed by the controller; do not set manually.
-    pub time_since_dash: f32,
-    /// Air dashes used since last grounding.
-    pub air_dashes_used: u32,
-}
-
-impl Default for CharacterDash {
-    fn default() -> Self {
-        Self {
-            speed: 28.0,
-            duration: Duration::from_millis(180),
-            cooldown: Duration::from_millis(400),
-            cancel_gravity: true,
-            max_air_dashes: 1,
-            time_since_dash: f32::MAX / 4.0,
-            air_dashes_used: 0,
-        }
-    }
-}
-
 /// Per-entity gravity override. When present, this takes priority over
 /// `CharacterController::gravity`.
 #[derive(Component, Reflect, Debug, Clone)]
@@ -275,34 +159,6 @@ impl Default for CharacterPush {
 #[reflect(Component, Debug)]
 pub struct ExternalMotion {
     pub velocity_delta: Vec3,
-}
-
-#[derive(Component, Reflect, Debug, Clone)]
-#[reflect(Component, Debug)]
-pub struct CharacterLook {
-    pub yaw: f32,
-    pub pitch: f32,
-    pub sensitivity: Vec2,
-    pub min_pitch: f32,
-    pub max_pitch: f32,
-}
-
-impl Default for CharacterLook {
-    fn default() -> Self {
-        Self {
-            yaw: 0.0,
-            pitch: 0.0,
-            sensitivity: Vec2::ONE,
-            min_pitch: -89.0_f32.to_radians(),
-            max_pitch: 89.0_f32.to_radians(),
-        }
-    }
-}
-
-impl CharacterLook {
-    pub fn orientation(&self) -> Quat {
-        Quat::from_euler(EulerRot::YXZ, self.yaw, self.pitch, 0.0)
-    }
 }
 
 #[derive(Component, Reflect, Debug, Clone, Default)]
@@ -357,6 +213,20 @@ impl CharacterColliderCache {
     }
 }
 
+/// When `active` is `Some`, core movement (ground/air/gravity) is suppressed for this tick.
+/// Ability plugins set this when they take over (dashing, mantling, flying, swimming).
+/// Custom movement systems can also use this to take exclusive control.
+///
+/// Reset to `None` each tick by `MovementPrepare`; abilities re-set it in `MovementExecute`.
+#[derive(Component, Reflect, Debug, Clone, Default)]
+#[reflect(Component, Debug)]
+pub struct MovementOverride {
+    /// If `Some`, names the system currently driving movement (for debugging).
+    pub active: Option<&'static str>,
+    /// If true, gravity is also suppressed this tick.
+    pub suppress_gravity: bool,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TouchContact {
     pub entity: Entity,
@@ -391,6 +261,12 @@ pub(crate) struct CharacterControllerScratch {
     pub previous_mode: crate::MovementMode,
     pub previous_support: Option<Entity>,
     pub previous_grounded: bool,
+    /// Set by MovementPrepare, read by MovementExecute. Effective support velocity for this tick.
+    pub computed_support_velocity: Vec3,
+    /// Set by MovementPrepare, read by MovementExecute. Pre-move ground contact.
+    pub pre_move_ground: Option<crate::GroundContact>,
+    /// Set by MovementPrepare. If true, execute and finalize skip this entity (SenseOnly mode).
+    pub skip_execute: bool,
 }
 
 impl Default for CharacterControllerScratch {
@@ -407,6 +283,9 @@ impl Default for CharacterControllerScratch {
             previous_mode: crate::MovementMode::Airborne,
             previous_support: None,
             previous_grounded: false,
+            computed_support_velocity: Vec3::ZERO,
+            pre_move_ground: None,
+            skip_execute: false,
         }
     }
 }

@@ -12,6 +12,7 @@ bevy_enhanced_input = { workspace = true }
 bevy_input_focus = { workspace = true }
 bevy_ui_widgets = { workspace = true }
 saddle-character-controller = { workspace = true }
+saddle-camera-fps-camera = { workspace = true }
 saddle-pane = { workspace = true }
 
 [lints]

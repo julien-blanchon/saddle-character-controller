@@ -7,19 +7,23 @@
 
 use avian3d::prelude::*;
 use bevy::{
-    input::common_conditions::input_just_pressed,
+    input::{common_conditions::input_just_pressed, mouse::AccumulatedMouseMotion},
     prelude::*,
     window::{CursorGrabMode, CursorOptions, WindowResolution},
 };
 use bevy_enhanced_input::prelude::*;
 use saddle_character_controller::{
     CharacterController, CharacterControllerPlugin, CharacterControllerState, CharacterFlying,
-    CharacterLook, CharacterMotionStats, FlightCollisionMode, SupportRotationPolicy,
+    CharacterMotionStats, FlightCollisionMode, SupportRotationPolicy,
     adapters::enhanced_input::{
-        AscendAction, CharacterControllerEnhancedInputPlugin, CrouchAction, JumpAction, LookAction,
+        AscendAction, CharacterControllerEnhancedInputPlugin, CrouchAction, JumpAction,
         MoveAction, SprintAction, TraverseAction,
     },
     convenience::environment::{CharacterControllerEnvironmentPlugin, SwimVolume},
+};
+use saddle_camera_fps_camera::{
+    FpsCamera, FpsCameraConfig, FpsCameraEffectsPlugin, FpsCameraExternalMotion, FpsCameraIntent,
+    FpsCameraPlugin, FpsCameraRuntime, FpsCameraSystems,
 };
 use saddle_pane::prelude::*;
 
@@ -35,14 +39,116 @@ pub struct DemoPlayer;
 pub struct DemoInstructions;
 
 // ---------------------------------------------------------------------------
-// Camera components & systems
+// FPS camera bridge (saddle-camera-fps-camera ↔ character controller)
 // ---------------------------------------------------------------------------
 
-/// Attach to a `Camera3d` entity for first-person follow behavior.
-#[derive(Component)]
-pub struct FirstPersonCamera {
-    pub target: Entity,
+/// Feeds character controller state into [`FpsCameraExternalMotion`] each frame.
+pub fn sync_fps_camera_motion(
+    player: Query<
+        (
+            &Transform,
+            &LinearVelocity,
+            &CharacterController,
+            &CharacterControllerState,
+        ),
+        With<DemoPlayer>,
+    >,
+    mut camera: Query<&mut FpsCameraExternalMotion, With<FpsCamera>>,
+) {
+    let Ok((transform, velocity, controller, state)) = player.single() else {
+        return;
+    };
+    let Ok(mut ext) = camera.single_mut() else {
+        return;
+    };
+    let view_height = if state.crouching {
+        controller.crouch_view_height
+    } else {
+        controller.standing_view_height
+    };
+    ext.enabled = true;
+    ext.position = transform.translation;
+    ext.velocity = velocity.0;
+    ext.grounded = state.ground.is_some();
+    ext.eye_height = Some(view_height);
+    ext.crouch_alpha = Some(if state.crouching { 1.0 } else { 0.0 });
+    ext.sprint_alpha = Some(
+        (velocity.0.xz().length() / (controller.speed * controller.sprint_speed_scale))
+            .clamp(0.0, 1.0),
+    );
 }
+
+/// Copies FPS camera orientation → controller state so movement is aligned with camera look.
+pub fn sync_fps_camera_look(
+    mut player: Query<&mut CharacterControllerState, With<DemoPlayer>>,
+    camera: Query<&FpsCameraRuntime, With<FpsCamera>>,
+) {
+    let Ok(runtime) = camera.single() else {
+        return;
+    };
+    let Ok(mut state) = player.single_mut() else {
+        return;
+    };
+    state.orientation = Quat::from_euler(EulerRot::YXZ, runtime.yaw, runtime.pitch, 0.0);
+}
+
+/// Feeds mouse motion into the FPS camera's look intent, gated by cursor lock state.
+pub fn feed_fps_camera_look(
+    lock_state: Res<CursorLockState>,
+    mouse: Res<AccumulatedMouseMotion>,
+    mut camera: Query<&mut FpsCameraIntent, With<FpsCamera>>,
+) {
+    if !lock_state.0 {
+        return;
+    }
+    let Ok(mut intent) = camera.single_mut() else {
+        return;
+    };
+    intent.look_delta += mouse.delta;
+}
+
+/// Registers the FPS camera plugins and bridge systems with correct ordering.
+/// Call this instead of manually adding camera follow systems.
+pub fn add_fps_camera_bridge(app: &mut App) {
+    app.add_plugins((FpsCameraPlugin::default(), FpsCameraEffectsPlugin::default()));
+    app.add_systems(
+        Update,
+        (
+            feed_fps_camera_look.before(FpsCameraSystems::ReadIntent),
+            sync_fps_camera_motion.before(FpsCameraSystems::UpdateLocomotion),
+            sync_fps_camera_look
+                .after(FpsCameraSystems::ReadIntent)
+                .before(FpsCameraSystems::UpdateLocomotion),
+        ),
+    );
+}
+
+/// Spawns a first-person camera entity driven by [`FpsCameraExternalMotion`].
+/// Returns the camera entity.
+pub fn spawn_fps_camera(commands: &mut Commands, player_transform: &Transform) -> Entity {
+    let config = FpsCameraConfig::default();
+    commands
+        .spawn((
+            Name::new("FPS Camera"),
+            Camera3d::default(),
+            Projection::Perspective(PerspectiveProjection {
+                fov: config.fov.base_fov,
+                ..default()
+            }),
+            *player_transform,
+            FpsCamera,
+            config,
+            FpsCameraExternalMotion {
+                enabled: true,
+                ..default()
+            },
+        ))
+        .id()
+}
+
+// ---------------------------------------------------------------------------
+// Legacy camera components (kept for third-person example)
+// ---------------------------------------------------------------------------
 
 /// Attach to a `Camera3d` entity for third-person follow behavior.
 #[derive(Component)]
@@ -50,27 +156,6 @@ pub struct ThirdPersonCamera {
     pub target: Entity,
     pub distance: f32,
     pub height: f32,
-}
-
-pub fn follow_first_person_camera(
-    targets: Query<
-        (&Transform, &CharacterController, &CharacterControllerState),
-        Without<FirstPersonCamera>,
-    >,
-    mut cameras: Query<(&FirstPersonCamera, &mut Transform), Without<CharacterController>>,
-) {
-    for (camera, mut transform) in &mut cameras {
-        let Ok((target_transform, controller, state)) = targets.get(camera.target) else {
-            continue;
-        };
-        let view_height = if state.crouching {
-            controller.crouch_view_height
-        } else {
-            controller.standing_view_height
-        };
-        transform.translation = target_transform.translation + Vec3::Y * view_height;
-        transform.rotation = state.orientation;
-    }
 }
 
 pub fn follow_third_person_camera(
@@ -96,24 +181,41 @@ pub fn follow_third_person_camera(
 // Cursor management
 // ---------------------------------------------------------------------------
 
-pub fn capture_cursor(mut cursor: Single<&mut CursorOptions>) {
+/// Tracks whether camera look is active. Decoupled from OS cursor state to avoid
+/// platform-dependent issues (e.g. macOS not locking cursor when window lacks focus).
+#[derive(Resource)]
+pub struct CursorLockState(pub bool);
+
+fn capture_cursor(mut cursor: Single<&mut CursorOptions>, mut state: ResMut<CursorLockState>) {
     cursor.grab_mode = CursorGrabMode::Locked;
     cursor.visible = false;
+    state.0 = true;
 }
 
-pub fn release_cursor(mut cursor: Single<&mut CursorOptions>) {
+fn release_cursor(mut cursor: Single<&mut CursorOptions>, mut state: ResMut<CursorLockState>) {
     cursor.grab_mode = CursorGrabMode::None;
     cursor.visible = true;
+    state.0 = false;
+}
+
+fn no_ui_hovered(query: Query<&Interaction>) -> bool {
+    query.iter().all(|i| matches!(i, Interaction::None))
 }
 
 /// Adds cursor capture/release systems (click to grab, Escape to release).
+/// Camera look is active by default. Press Escape to free the cursor and freeze look,
+/// then click to recapture.
 pub fn add_cursor_systems(app: &mut App) {
+    app.insert_resource(CursorLockState(true));
+    app.add_systems(Startup, capture_cursor);
     app.add_systems(
         Update,
         (
-            capture_cursor.run_if(input_just_pressed(MouseButton::Left)),
+            capture_cursor
+                .run_if(input_just_pressed(MouseButton::Left).and(no_ui_hovered)),
             release_cursor.run_if(input_just_pressed(KeyCode::Escape)),
-        ),
+        )
+            .chain(),
     );
 }
 
@@ -131,13 +233,6 @@ pub fn default_character_actions() -> impl Bundle {
             Action::<MoveAction>::new(),
             DeadZone::default(),
             Bindings::spawn((Cardinal::wasd_keys(), Axial::left_stick())),
-        ),
-        (
-            Action::<LookAction>::new(),
-            Bindings::spawn((
-                Spawn((Binding::mouse_motion(), Scale::splat(0.0025))),
-                Axial::right_stick().with((Scale::splat(0.06), DeadZone::default())),
-            )),
         ),
         (Action::<JumpAction>::new(), bindings![KeyCode::Space, GamepadButton::South]),
         (
@@ -224,8 +319,6 @@ pub struct ControllerPane {
     pub step_size: f32,
     #[pane(tab = "Movement", slider, min = 0.0, max = 24.0, step = 0.5)]
     pub air_acceleration_hz: f32,
-    #[pane(tab = "Movement", slider, min = 0.0005, max = 0.01, step = 0.0001)]
-    pub look_sensitivity: f32,
     #[pane(tab = "Movement")]
     pub inherit_support_yaw: bool,
     #[pane(tab = "Traversal")]
@@ -252,7 +345,6 @@ impl Default for ControllerPane {
             jump_height: 1.8,
             step_size: 0.7,
             air_acceleration_hz: 12.0,
-            look_sensitivity: 0.0022,
             inherit_support_yaw: true,
             flight_enabled: false,
             flight_speed: 14.0,
@@ -272,7 +364,6 @@ pub fn sync_controller_pane(
     mut players: Query<
         (
             &mut CharacterController,
-            &mut CharacterLook,
             &CharacterControllerState,
             &CharacterMotionStats,
             Option<&mut CharacterFlying>,
@@ -280,7 +371,7 @@ pub fn sync_controller_pane(
         With<DemoPlayer>,
     >,
 ) {
-    let Ok((mut controller, mut look, state, stats, flying)) = players.single_mut() else {
+    let Ok((mut controller, state, stats, flying)) = players.single_mut() else {
         return;
     };
     let mut flight_snapshot = None;
@@ -296,7 +387,6 @@ pub fn sync_controller_pane(
         } else {
             SupportRotationPolicy::None
         };
-        look.sensitivity = Vec2::splat(pane.look_sensitivity);
     }
 
     if let Some(mut flying) = flying {
@@ -322,7 +412,6 @@ pub fn sync_controller_pane(
     pane.jump_height = controller.jump_height;
     pane.step_size = controller.step_size;
     pane.air_acceleration_hz = controller.air_acceleration_hz;
-    pane.look_sensitivity = look.sensitivity.x;
     pane.inherit_support_yaw = controller.support_rotation_policy == SupportRotationPolicy::YawOnly;
     if let Some((enabled, speed, noclip)) = flight_snapshot {
         pane.flight_enabled = enabled;
@@ -577,8 +666,9 @@ pub fn spawn_controller_visual(
     });
 }
 
-/// Create an [`App`] pre-configured with the window, physics, pane plugins, and common systems.
-/// The caller still needs to add `CharacterControllerPlugin`, scene setup, and camera systems.
+/// Create an [`App`] pre-configured with the window, physics, FPS camera bridge, pane,
+/// and cursor management. The caller still needs to add scene setup and spawn the player +
+/// camera (use [`spawn_fps_camera`]).
 pub fn base_app(title: &str) -> App {
     let mut app = App::new();
     app.insert_resource(Time::<Fixed>::from_hz(60.0))
@@ -595,6 +685,7 @@ pub fn base_app(title: &str) -> App {
             pane_plugins(),
         ))
         .register_pane::<ControllerPane>();
+    add_fps_camera_bridge(&mut app);
     add_cursor_systems(&mut app);
     app.add_systems(Update, sync_controller_pane);
     app
