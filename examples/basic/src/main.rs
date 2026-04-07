@@ -1,17 +1,18 @@
 //! # Basic Character Controller
 //!
-//! The simplest possible working character controller: a capsule that walks, sprints,
-//! crouches, and jumps on a flat ground plane with a few static obstacles.
+//! The simplest working character controller: walk, sprint, jump, and crouch on a flat
+//! ground plane with platforms at varying heights to verify jumping.
 //!
 //! **Demonstrates**: plugin setup, character entity spawn, input wiring, FPS camera integration.
+//! **Test**: walk on ground, jump onto platforms, sprint, crouch.
 
 use std::time::Duration;
 
 use bevy::prelude::*;
 use common::{
-    DemoFixedSystems, DemoPlayer, add_demo_controller_plugins, animate_platforms,
-    default_character_actions, spawn_block, spawn_demo_instructions, spawn_flat_ground,
-    spawn_fps_camera, spawn_lighting,
+    DemoFixedSystems, DemoPlayer, add_demo_controller_plugins, add_diagnostic_hud,
+    animate_platforms, default_character_actions, spawn_block, spawn_demo_instructions,
+    spawn_flat_ground, spawn_fps_camera, spawn_lighting,
 };
 use saddle_character_controller::{
     CharacterController, CharacterControllerSystems, CharacterFlying, CharacterPush,
@@ -22,6 +23,7 @@ fn main() -> AppExit {
     let mut app = common::base_app("character_controller basic");
 
     add_demo_controller_plugins(&mut app);
+    add_diagnostic_hud(&mut app);
 
     app.configure_sets(
         FixedUpdate,
@@ -46,39 +48,56 @@ fn setup_scene(
     spawn_demo_instructions(
         &mut commands,
         "Basic Controller",
-        &["Explore the crate field, then use the pane to tweak speed, jump height, and flight."],
+        &[
+            "Walk on the ground, jump onto the colored platforms.",
+            "Check the HUD (bottom-left) to verify grounded state.",
+        ],
     );
 
+    // -- Jump test platforms at increasing heights ----------------------------
+    // Low platform (easy jump)
     spawn_block(
         &mut commands,
         &mut meshes,
         &mut materials,
-        "Crate Cluster A",
-        Vec3::new(-4.0, 1.0, 2.0),
-        Vec3::new(2.0, 2.0, 2.0),
-        Color::srgb(0.56, 0.39, 0.26),
+        "Low Platform",
+        Vec3::new(4.0, 0.4, 0.0),
+        Vec3::new(3.0, 0.8, 3.0),
+        Color::srgb(0.35, 0.58, 0.44),
     );
+    // Medium platform
     spawn_block(
         &mut commands,
         &mut meshes,
         &mut materials,
-        "Crate Cluster B",
-        Vec3::new(4.5, 0.5, -3.0),
-        Vec3::new(3.0, 1.0, 3.0),
+        "Medium Platform",
+        Vec3::new(4.0, 0.9, -5.0),
+        Vec3::new(3.0, 1.8, 3.0),
+        Color::srgb(0.56, 0.49, 0.26),
+    );
+    // Tall wall (cannot jump over — tests collision)
+    spawn_block(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        "Tall Wall",
+        Vec3::new(-5.0, 2.0, -4.0),
+        Vec3::new(6.0, 4.0, 0.6),
+        Color::srgb(0.62, 0.32, 0.28),
+    );
+    // Gap jump target — narrow platform across a gap
+    spawn_block(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        "Gap Target",
+        Vec3::new(-5.0, 0.3, 4.0),
+        Vec3::new(2.0, 0.6, 2.0),
         Color::srgb(0.39, 0.47, 0.62),
-    );
-    spawn_block(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        "Crate Cluster C",
-        Vec3::new(0.0, 1.5, -10.0),
-        Vec3::new(2.5, 3.0, 2.5),
-        Color::srgb(0.31, 0.58, 0.47),
     );
 
     // -- Player character ---------------------------------------------------
-    let player_transform = Transform::from_xyz(0.0, 3.0, 14.0);
+    let player_transform = Transform::from_xyz(0.0, 3.0, 10.0);
 
     let controller = CharacterController {
         speed: 11.0,

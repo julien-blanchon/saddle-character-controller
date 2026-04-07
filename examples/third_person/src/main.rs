@@ -1,30 +1,31 @@
 //! # Third Person Camera
 //!
 //! The character controller with a trailing third-person camera instead of first-person.
-//! The character body is rendered as a visible cube, and the camera follows behind at a
-//! configurable distance and height. Includes obstacles plus mantling for variety.
+//! The character body is rendered as a visible cube. Includes jump platforms to verify
+//! jumping works in third-person.
 //!
-//! **Demonstrates**: third-person camera integration, visible player body, `CharacterMantle`,
-//! `CharacterSwimming`, `sprint_speed_scale`.
+//! **Demonstrates**: third-person camera integration, visible player body, mouse look.
+//! **Test**: walk, jump on platforms, sprint. Verify jump works on flat ground.
 
 use std::time::Duration;
 
 use bevy::{input::mouse::AccumulatedMouseMotion, prelude::*};
 use common::{
     CursorLockState, DemoFixedSystems, DemoPlayer, ThirdPersonCamera, add_demo_controller_plugins,
-    animate_platforms, default_character_actions, follow_third_person_camera, spawn_block,
-    spawn_controller_visual, spawn_demo_instructions, spawn_flat_ground, spawn_lighting,
-    spawn_platform, spawn_stairs,
+    add_diagnostic_hud, animate_platforms, default_character_actions, follow_third_person_camera,
+    spawn_block, spawn_controller_visual, spawn_demo_instructions, spawn_flat_ground,
+    spawn_lighting, spawn_stairs,
 };
 use saddle_character_controller::{
     CharacterController, CharacterControllerState, CharacterControllerSystems, CharacterFlying,
-    CharacterMantle, CharacterPush, CharacterSwimming,
+    CharacterPush,
 };
 use saddle_character_controller_example_common as common;
 
 fn main() -> AppExit {
     let mut app = common::base_app("character_controller third_person");
     add_demo_controller_plugins(&mut app);
+    add_diagnostic_hud(&mut app);
 
     app.configure_sets(
         FixedUpdate,
@@ -41,7 +42,6 @@ fn main() -> AppExit {
     app.run()
 }
 
-/// Applies mouse motion to the controller's orientation when the cursor is locked.
 fn third_person_mouse_look(
     lock_state: Res<CursorLockState>,
     mouse: Res<AccumulatedMouseMotion>,
@@ -71,81 +71,45 @@ fn setup_scene(
         &mut commands,
         "Third Person",
         &[
-            "Watch the visible body and camera framing while running the course. Mantle, sprint, and swimming are enabled.",
+            "Walk and jump on the flat ground.",
+            "Jump onto the colored platforms.",
+            "Climb the stairs.",
         ],
     );
 
-    // -- Obstacles (same as basic + traversal) ------------------------------
+    // -- Jump platforms (same as basic) -------------------------------------
     spawn_block(
         &mut commands,
         &mut meshes,
         &mut materials,
-        "Crate Cluster A",
-        Vec3::new(-4.0, 1.0, 2.0),
-        Vec3::new(2.0, 2.0, 2.0),
-        Color::srgb(0.56, 0.39, 0.26),
-    );
-    spawn_block(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        "Crate Cluster B",
-        Vec3::new(4.5, 0.5, -3.0),
-        Vec3::new(3.0, 1.0, 3.0),
-        Color::srgb(0.39, 0.47, 0.62),
-    );
-    spawn_block(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        "Crate Cluster C",
-        Vec3::new(0.0, 1.5, -10.0),
-        Vec3::new(2.5, 3.0, 2.5),
-        Color::srgb(0.31, 0.58, 0.47),
-    );
-
-    // Traversal geometry — mantle blocks, tall wall, stairs, ledge.
-    spawn_block(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        "Mantle Block",
-        Vec3::new(0.0, 0.75, -2.0),
-        Vec3::new(2.0, 1.5, 2.0),
+        "Low Platform",
+        Vec3::new(4.0, 0.4, 0.0),
+        Vec3::new(3.0, 0.8, 3.0),
         Color::srgb(0.35, 0.58, 0.44),
     );
     spawn_block(
         &mut commands,
         &mut meshes,
         &mut materials,
-        "Tall Wall",
-        Vec3::new(8.0, 2.0, -6.0),
-        Vec3::new(1.0, 4.0, 8.0),
-        Color::srgb(0.62, 0.32, 0.28),
+        "Medium Platform",
+        Vec3::new(4.0, 0.9, -5.0),
+        Vec3::new(3.0, 1.8, 3.0),
+        Color::srgb(0.56, 0.49, 0.26),
     );
+
+    // -- Stairs -------------------------------------------------------------
     spawn_stairs(
         &mut commands,
         &mut meshes,
         &mut materials,
-        Vec3::new(-10.0, 0.0, -8.0),
+        Vec3::new(-8.0, 0.0, -4.0),
         6,
         1.0,
         0.3,
         2.0,
     );
-    spawn_platform(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        "Traversal Ledge",
-        Vec3::new(14.0, 2.6, 4.0),
-        Vec3::new(6.0, 0.3, 3.0),
-        Color::srgb(0.44, 0.49, 0.68),
-        None,
-        None,
-    );
 
-    // -- Player character (third-person tuning) -----------------------------
+    // -- Player character ---------------------------------------------------
     let controller = CharacterController {
         speed: 10.0,
         sprint_speed_scale: 1.35,
@@ -160,15 +124,12 @@ fn setup_scene(
             controller,
             CharacterFlying::default(),
             CharacterPush::default(),
-            CharacterSwimming::default(),
-            CharacterMantle::default(),
             Visibility::Inherited,
             Transform::from_xyz(0.0, 3.0, 12.0),
             default_character_actions(),
         ))
         .id();
 
-    // The player needs a visible body in third-person (in first-person it is invisible).
     spawn_controller_visual(
         &mut commands,
         &mut meshes,

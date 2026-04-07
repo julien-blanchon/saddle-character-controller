@@ -13,8 +13,8 @@ use bevy::{
 };
 use bevy_enhanced_input::prelude::*;
 use saddle_character_controller::{
-    CharacterController, CharacterControllerPlugin, CharacterControllerState, CharacterFlying,
-    CharacterMotionStats, FlightCollisionMode, SupportRotationPolicy,
+    AccumulatedInput, CharacterController, CharacterControllerPlugin, CharacterControllerState,
+    CharacterFlying, CharacterMotionStats, FlightCollisionMode, SupportRotationPolicy,
     adapters::enhanced_input::{
         AscendAction, CharacterControllerEnhancedInputPlugin, CrouchAction, JumpAction,
         MoveAction, SprintAction, TraverseAction,
@@ -287,6 +287,102 @@ pub fn spawn_demo_instructions(commands: &mut Commands, title: &str, extra_lines
 }
 
 // ---------------------------------------------------------------------------
+// Diagnostic HUD — real-time controller state overlay (bottom-left)
+// ---------------------------------------------------------------------------
+
+#[derive(Component)]
+pub struct DiagnosticHud;
+
+pub fn spawn_diagnostic_hud(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Diagnostic HUD"),
+        DiagnosticHud,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(20.0),
+            bottom: Val::Px(20.0),
+            width: Val::Px(380.0),
+            padding: UiRect::all(Val::Px(12.0)),
+            border_radius: BorderRadius::all(Val::Px(12.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.02, 0.02, 0.05, 0.85)),
+        Text::new("Loading..."),
+        TextFont {
+            font_size: 14.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.7, 0.9, 0.7)),
+        ZIndex(10),
+    ));
+}
+
+pub fn update_diagnostic_hud(
+    players: Query<
+        (
+            &Transform,
+            &LinearVelocity,
+            &CharacterControllerState,
+            &CharacterMotionStats,
+            &AccumulatedInput,
+        ),
+        With<DemoPlayer>,
+    >,
+    mut huds: Query<&mut Text, With<DiagnosticHud>>,
+) {
+    let Ok((transform, velocity, state, stats, input)) = players.single() else {
+        return;
+    };
+    let Ok(mut text) = huds.single_mut() else {
+        return;
+    };
+    let grounded_str = if let Some(ground) = state.ground {
+        if ground.walkable {
+            format!("YES (n={:.2},{:.2},{:.2})", ground.normal.x, ground.normal.y, ground.normal.z)
+        } else {
+            "SLIDING".to_string()
+        }
+    } else {
+        "NO".to_string()
+    };
+    let jump_buf = input
+        .jump_pressed_for
+        .map(|age| format!("{:.0}ms", age * 1000.0))
+        .unwrap_or_else(|| "-".to_string());
+    **text = format!(
+        "Mode: {:?}\n\
+         Grounded: {}\n\
+         Position: ({:.1}, {:.1}, {:.1})\n\
+         Velocity: ({:.1}, {:.1}, {:.1})\n\
+         H.Speed: {:.1}  V.Speed: {:.1}\n\
+         Speed: {:.1}\n\
+         Jump buffer: {}\n\
+         Crouching: {}\n\
+         Casts/tick: {}",
+        state.movement_mode,
+        grounded_str,
+        transform.translation.x,
+        transform.translation.y,
+        transform.translation.z,
+        velocity.x,
+        velocity.y,
+        velocity.z,
+        stats.horizontal_speed,
+        velocity.y,
+        stats.current_speed,
+        jump_buf,
+        state.crouching,
+        stats.shape_casts_last_tick,
+    );
+}
+
+/// Adds diagnostic HUD spawn + update systems. Call after `base_app` or manually.
+pub fn add_diagnostic_hud(app: &mut App) {
+    app.add_systems(Startup, spawn_diagnostic_hud);
+    app.add_systems(Update, update_diagnostic_hud);
+}
+
+// ---------------------------------------------------------------------------
 // Saddle-pane integration
 // ---------------------------------------------------------------------------
 
@@ -495,6 +591,10 @@ pub fn spawn_flat_ground(
     materials: &mut Assets<StandardMaterial>,
     size: f32,
 ) {
+    // Use a thick cuboid instead of half_space — Avian3D's shape cast (used for ground
+    // probing) is unreliable against infinite half-space colliders, causing the controller
+    // to never detect ground and thus never allow jumping.
+    let thickness = 1.0;
     commands.spawn((
         Name::new("Ground"),
         Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(size)))),
@@ -503,8 +603,9 @@ pub fn spawn_flat_ground(
             perceptual_roughness: 1.0,
             ..default()
         })),
+        Transform::from_xyz(0.0, -thickness * 0.5, 0.0),
         RigidBody::Static,
-        Collider::half_space(Vec3::Y),
+        Collider::cuboid(size * 2.0, thickness, size * 2.0),
     ));
 }
 

@@ -239,16 +239,22 @@ fn setup(
         Transform::from_xyz(12.0, 18.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
+    // Use a thick cuboid instead of half_space — Avian3D's shape cast (used for ground
+    // probing) is unreliable against infinite half-space colliders, causing the controller
+    // to never detect ground and thus never allow jumping.
+    let ground_size = 80.0;
+    let ground_thickness = 1.0;
     commands.spawn((
         Name::new("Lab Ground"),
-        Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(80.0)))),
+        Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(ground_size)))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.15, 0.18, 0.17),
             perceptual_roughness: 1.0,
             ..default()
         })),
+        Transform::from_xyz(0.0, -ground_thickness * 0.5, 0.0),
         RigidBody::Static,
-        Collider::half_space(Vec3::Y),
+        Collider::cuboid(ground_size * 2.0, ground_thickness, ground_size * 2.0),
     ));
 
     spawn_block(

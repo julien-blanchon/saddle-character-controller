@@ -10,6 +10,8 @@ use saddle_character_state_machine::CharacterStateMachineRuntime;
 pub fn list_scenarios() -> Vec<&'static str> {
     vec![
         "controller_smoke",
+        "controller_grounding",
+        "controller_jump",
         "controller_platform_rotation",
         "controller_flying_noclip",
         "controller_slopes_and_stairs",
@@ -23,6 +25,8 @@ pub fn list_scenarios() -> Vec<&'static str> {
 pub fn scenario_by_name(name: &str) -> Option<Scenario> {
     match name {
         "controller_smoke" => Some(controller_smoke()),
+        "controller_grounding" => Some(controller_grounding()),
+        "controller_jump" => Some(controller_jump()),
         "controller_platform_rotation" => Some(controller_platform_rotation()),
         "controller_flying_noclip" => Some(controller_flying_noclip()),
         "controller_slopes_and_stairs" => Some(controller_slopes_and_stairs()),
@@ -142,6 +146,145 @@ fn controller_smoke() -> Scenario {
         .then(Action::Screenshot("controller_smoke".into()))
         .then(Action::WaitFrames(1))
         .then(assertions::log_summary("controller_smoke"))
+        .build()
+}
+
+fn press_jump() -> Action {
+    Action::Custom(Box::new(move |world| {
+        let entity = controller_entity(world);
+        let mut entity_ref = world.entity_mut(entity);
+        let mut input = entity_ref
+            .get_mut::<AccumulatedInput>()
+            .expect("controller should expose AccumulatedInput");
+        input.jump_pressed_for = Some(0.0);
+        input.jump_held = true;
+        info!(
+            "[e2e:press_jump] set jump_pressed_for=Some(0.0), jump_held=true"
+        );
+    }))
+}
+
+fn release_jump() -> Action {
+    Action::Custom(Box::new(move |world| {
+        let entity = controller_entity(world);
+        let mut entity_ref = world.entity_mut(entity);
+        let mut input = entity_ref
+            .get_mut::<AccumulatedInput>()
+            .expect("controller should expose AccumulatedInput");
+        input.release_jump();
+    }))
+}
+
+fn log_controller_state(label: &'static str) -> Action {
+    Action::Custom(Box::new(move |world| {
+        let entity = controller_entity(world);
+        let entity_ref = world.entity(entity);
+        let input = entity_ref
+            .get::<AccumulatedInput>()
+            .expect("controller should expose AccumulatedInput");
+        let state = entity_ref
+            .get::<CharacterControllerState>()
+            .expect("controller should expose state");
+        let diagnostics = world.resource::<crate::LabDiagnostics>();
+        info!(
+            "[e2e:{label}] mode={} pos=({:.2},{:.2},{:.2}) speed={:.1} grounded_on={} jump_buf={:?} jump_held={} grounded_frames={} time_since_grounded={:.3}",
+            diagnostics.movement_mode,
+            diagnostics.controller_position.x,
+            diagnostics.controller_position.y,
+            diagnostics.controller_position.z,
+            diagnostics.current_speed,
+            diagnostics.grounded_on,
+            input.jump_pressed_for,
+            input.jump_held,
+            state.grounded_frames,
+            state.time_since_grounded,
+        );
+    }))
+}
+
+/// Tests that the controller lands on the ground and detects it as grounded.
+/// This is the most fundamental test — if this fails, jumping cannot work.
+fn controller_grounding() -> Scenario {
+    Scenario::builder("controller_grounding")
+        .description("Drop the controller from height onto the flat ground and verify it becomes grounded.")
+        .then(Action::WaitFrames(10))
+        // Place controller above ground — it should fall and land
+        .then(set_controller_pose(Vec3::new(0.0, 4.0, 0.0)))
+        .then(set_input(Vec2::ZERO, false))
+        .then(log_controller_state("grounding_start"))
+        .then(Action::WaitFrames(45))
+        .then(log_controller_state("grounding_after_fall"))
+        .then(assertions::custom(
+            "controller is grounded after falling onto flat ground",
+            |world| world.resource::<crate::LabDiagnostics>().movement_mode == "Grounded",
+        ))
+        .then(assertions::custom(
+            "controller position is near ground level (y ~ 0.9)",
+            |world| {
+                let pos = world.resource::<crate::LabDiagnostics>().controller_position;
+                pos.y > 0.5 && pos.y < 2.0
+            },
+        ))
+        .then(Action::Screenshot("grounding_landed".into()))
+        // Walk forward to verify grounding persists while moving
+        .then(set_input(Vec2::new(0.0, 1.0), false))
+        .then(Action::WaitFrames(20))
+        .then(log_controller_state("grounding_walking"))
+        .then(assertions::custom(
+            "controller stays grounded while walking",
+            |world| world.resource::<crate::LabDiagnostics>().movement_mode == "Grounded",
+        ))
+        .then(set_input(Vec2::ZERO, false))
+        .then(Action::Screenshot("grounding_walking".into()))
+        .then(Action::WaitFrames(1))
+        .then(assertions::log_summary("controller_grounding"))
+        .build()
+}
+
+/// Tests jumping from flat ground: press jump, verify airborne, verify landing.
+fn controller_jump() -> Scenario {
+    Scenario::builder("controller_jump")
+        .description("Stand on flat ground, press jump, verify the controller goes airborne, then lands back on ground.")
+        .then(Action::WaitFrames(10))
+        // Place on ground and wait to settle
+        .then(set_controller_pose(Vec3::new(5.0, 4.0, 5.0)))
+        .then(set_input(Vec2::ZERO, false))
+        .then(Action::WaitFrames(60))
+        .then(log_controller_state("jump_pre"))
+        .then(assertions::custom(
+            "controller is grounded before jump",
+            |world| world.resource::<crate::LabDiagnostics>().movement_mode == "Grounded",
+        ))
+        .then(Action::Screenshot("jump_pre".into()))
+        // Press jump and check across multiple frames to catch the airborne moment
+        .then(press_jump())
+        .then(Action::WaitFrames(2))
+        .then(log_controller_state("jump_frame+2"))
+        .then(Action::WaitFrames(3))
+        .then(log_controller_state("jump_frame+5"))
+        .then(Action::WaitFrames(5))
+        .then(log_controller_state("jump_frame+10"))
+        .then(Action::WaitFrames(5))
+        .then(log_controller_state("jump_frame+15"))
+        .then(release_jump())
+        .then(assertions::custom(
+            "controller left ground at some point (y > 1.3 or mode != Grounded)",
+            |world| {
+                let d = world.resource::<crate::LabDiagnostics>();
+                d.controller_position.y > 1.3 || d.movement_mode != "Grounded"
+            },
+        ))
+        .then(Action::Screenshot("jump_peak".into()))
+        // Wait to land
+        .then(Action::WaitFrames(60))
+        .then(log_controller_state("jump_landed"))
+        .then(assertions::custom(
+            "controller lands back on ground after jump",
+            |world| world.resource::<crate::LabDiagnostics>().movement_mode == "Grounded",
+        ))
+        .then(Action::Screenshot("jump_landed".into()))
+        .then(Action::WaitFrames(1))
+        .then(assertions::log_summary("controller_jump"))
         .build()
 }
 

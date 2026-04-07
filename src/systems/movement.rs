@@ -627,29 +627,35 @@ pub(crate) fn run_movement_finalize(
                 &mut stats,
             )
         };
-        if post_ground.is_none() || post_ground.is_some_and(|ground| !ground.walkable) {
-            snap_to_ground(
-                entity,
-                controller,
-                &move_and_slide,
-                cache,
-                &state,
-                &mut transform,
-                &mut stats,
-            );
-            post_ground = ground_probe(
-                entity,
-                controller,
-                &move_and_slide,
-                &surfaces,
-                &support_colliders,
-                cache,
-                &state,
-                &transform,
-                state.support_velocity,
-                dt,
-                &mut stats,
-            );
+        // Don't snap to ground on the frame the character just jumped — snap_to_ground
+        // casts far enough downward (snap_distance + step_down_detection_distance) to
+        // reach the ground even after one tick of jump velocity, which would cancel the
+        // jump entirely.
+        if !scratch.pending_jump {
+            if post_ground.is_none() || post_ground.is_some_and(|ground| !ground.walkable) {
+                snap_to_ground(
+                    entity,
+                    controller,
+                    &move_and_slide,
+                    cache,
+                    &state,
+                    &mut transform,
+                    &mut stats,
+                );
+                post_ground = ground_probe(
+                    entity,
+                    controller,
+                    &move_and_slide,
+                    &surfaces,
+                    &support_colliders,
+                    cache,
+                    &state,
+                    &transform,
+                    state.support_velocity,
+                    dt,
+                    &mut stats,
+                );
+            }
         }
         if flying.is_some_and(|flight| flight.enabled) {
             post_ground = None;
