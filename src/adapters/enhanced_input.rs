@@ -223,4 +223,3 @@ pub(crate) fn clear_ascend_active_on_complete(
         input.set_ascend_active(false);
     }
 }
-
