@@ -19,6 +19,7 @@ pub fn list_scenarios() -> Vec<&'static str> {
         "controller_third_person",
         "controller_water",
         "controller_stress",
+        "controller_mantle",
     ]
 }
 
@@ -34,6 +35,7 @@ pub fn scenario_by_name(name: &str) -> Option<Scenario> {
         "controller_third_person" => Some(controller_third_person()),
         "controller_water" => Some(controller_water()),
         "controller_stress" => Some(controller_stress()),
+        "controller_mantle" => Some(controller_mantle()),
         _ => None,
     }
 }
@@ -546,5 +548,62 @@ fn controller_stress() -> Scenario {
         .then(Action::Screenshot("stress_stable".into()))
         .then(Action::WaitFrames(1))
         .then(assertions::log_summary("controller_stress"))
+        .build()
+}
+
+/// Exercise the CharacterMantle ability: place the controller in front of and below the
+/// lab mantle block, walk into it, and verify the controller climbs onto the block top.
+/// The mantle block is at (0.0, 0.8, -2.0) with half-extents (1.1, 0.8, 1.1),
+/// so its top face is at y ≈ 1.6 and its face closest to Z+ is at z ≈ -0.9.
+fn controller_mantle() -> Scenario {
+    Scenario::builder("controller_mantle")
+        .description(
+            "Position the controller in front of the lab mantle block at ground level, \
+             walk into it to trigger CharacterMantle, and verify the controller ends up \
+             on top of the block (y > 1.4).",
+        )
+        // Settle the scene first.
+        .then(Action::WaitFrames(20))
+        // Place the controller just in front of the mantle block's south face, at ground level.
+        // Block south face z ≈ -0.9; place controller at z = 0.2 so it approaches from +Z.
+        .then(set_controller_pose(Vec3::new(0.0, 4.0, 0.2)))
+        .then(set_input(Vec2::ZERO, false))
+        // Let the controller fall to the ground before approaching.
+        .then(Action::WaitFrames(45))
+        .then(assertions::custom(
+            "controller grounded before mantle attempt",
+            |world| world.resource::<crate::LabDiagnostics>().movement_mode == "Grounded",
+        ))
+        .then(Action::Screenshot("mantle_pre".into()))
+        // Walk toward the block (negative Z direction).
+        .then(set_input(Vec2::new(0.0, -1.0), false))
+        // Wait up to 90 frames for the controller to reach and climb the block.
+        .then(Action::WaitUntil {
+            label: "controller climbed onto mantle block".into(),
+            condition: Box::new(|world: &World| {
+                let diagnostics = world.resource::<crate::LabDiagnostics>();
+                // Top of block is y ≈ 1.6; controller capsule center will be above that.
+                diagnostics.controller_position.y > 1.4
+                    && diagnostics.movement_mode == "Grounded"
+            }),
+            max_frames: 90,
+        })
+        .then(set_input(Vec2::ZERO, false))
+        .then(assertions::custom(
+            "controller reached the top of the mantle block",
+            |world| {
+                let diagnostics = world.resource::<crate::LabDiagnostics>();
+                diagnostics.controller_position.y > 1.4
+                    && diagnostics.movement_mode == "Grounded"
+                    && diagnostics.controller_position.is_finite()
+            },
+        ))
+        .then(assertions::custom(
+            "controller values remain finite after mantle",
+            controller_state_is_finite,
+        ))
+        .then(Action::Screenshot("mantle_climbed".into()))
+        .then(Action::WaitFrames(1))
+        .then(assertions::log_summary("controller_mantle"))
         .build()
 }
